@@ -26,7 +26,7 @@ void free_object(r_obj *o);
 
 HashTable *hash_table_create(size_t size);
 void hash_table_set(HashTable *hash_table, const char *key, r_obj *val);
-r_obj hash_table_get(HashTable *hash_table, const char *key);
+r_obj *hash_table_get(HashTable *hash_table, const char *key);
 void hash_table_del(HashTable *hash_table, const char *key);
 void hash_table_destroy(HashTable *hash_table);
 

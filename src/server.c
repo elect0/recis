@@ -1,15 +1,31 @@
 #include <arpa/inet.h>
-#include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "../include/hash_table.h"
+
 #define PORT 6379
 #define BUFFER_SIZE 1024
+#define MAX_EVENTS 10
+
+void set_nonblocking(int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (flags == -1) {
+    perror("fcntl F_GETFL");
+    return;
+  }
+
+  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+    perror("fcntl F_SETFL");
+  }
+}
 
 int main() {
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -37,31 +53,114 @@ int main() {
     exit(EXIT_FAILURE);
   }
 
-  printf("Sever listening on port %d...\n", PORT);
+  HashTable *db = hash_table_create(1024);
 
-  for (;;) {
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
+  set_nonblocking(server_fd);
 
-    int client_fd =
-        accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
-    if (client_fd < 0) {
-      perror("Accept failed");
-      continue;
+  int epfd = epoll_create1(0); // 0 = no flags, or use EPOLL_CLOEXEC
+  if (epfd == -1) {
+    perror("epoll_create1");
+    return 1;
+  }
+
+  printf("epoll instance created: %d\n", epfd);
+
+  struct epoll_event ev;
+  ev.events = EPOLLIN;
+  ev.data.fd = server_fd;
+
+  if (epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
+    perror("epoll_ctl: server_socket");
+    return 1;
+  }
+
+  struct epoll_event events[MAX_EVENTS];
+
+  while (1) {
+    int nfds = epoll_wait(epfd, events, MAX_EVENTS, -1);
+    if (nfds == -1) {
+      perror("epoll_wait");
+      break;
     }
 
-    printf("Client connnected: %s\n", inet_ntoa(client_addr.sin_addr));
+    for (int n = 0; n < nfds; ++n) {
+      int current_fd = events[n].data.fd;
 
-    char buffer[BUFFER_SIZE] = {0};
-    ssize_t valread = read(client_fd, buffer, BUFFER_SIZE - 1);
+      if (current_fd == server_fd) {
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
 
-    if (valread > 0) {
-      printf("Received: %s\n", buffer);
-      char *msg = "+OK\r\n";
-      write(client_fd, msg, strlen(msg));
+        int client_fd =
+            accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+
+        if (client_fd == -1) {
+          perror("accept");
+          continue;
+        }
+
+        set_nonblocking(client_fd);
+
+        struct epoll_event ev;
+        ev.events = EPOLLIN;
+        ev.data.fd = client_fd;
+        if (epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
+          perror("epoll_ctl: client");
+          close(client_fd);
+        }
+
+        printf("New client connected from: FD %d\n", client_fd);
+      } else {
+
+        char buffer[BUFFER_SIZE] = {0};
+        ssize_t valread = read(current_fd, buffer, BUFFER_SIZE - 1);
+
+        if (valread > 0) {
+          buffer[valread] = '\0';
+          printf("Received: %s\n", buffer);
+          char *command = strtok(buffer, " \r\n");
+          if (command == NULL)
+            continue;
+
+          if (strcmp(command, "SET") == 0) {
+            char *key = strtok(NULL, " \r\n");
+            char *value = strtok(NULL, " \r\n");
+
+            if (key == NULL || value == NULL) {
+              char *err = "Error: wrong number of arguments\r\n";
+              write(current_fd, err, strlen(err));
+            } else {
+              r_obj *o = create_string_object(value);
+              hash_table_set(db, key, o);
+
+              char *ok = "+OK\r\n";
+              write(current_fd, ok, strlen(ok));
+            }
+          } else if (strcmp(command, "GET") == 0) {
+            char *key = strtok(NULL, " \r\n");
+            if (key == NULL) {
+              char *err = "Error: wrong number of arguments\r\n";
+              write(current_fd, err, strlen(err));
+            } else {
+              r_obj *o = hash_table_get(db, key);
+
+              char *msg;
+              if (o == NULL) {
+                msg = "Error: Couldn't find your value based on the key\r\n";
+              } else {
+                char *val = (char *)o->data;
+                write(current_fd, val, strlen(val));
+                msg = "Found.\r\n";
+              }
+              write(current_fd, msg, strlen(msg));
+            }
+          }
+        } else {
+          epoll_ctl(epfd, EPOLL_CTL_DEL, current_fd, NULL);
+          close(current_fd);
+          printf("client dissconnected: FD :%d", current_fd);
+        }
+      }
     }
-    close(client_fd);
-    printf("Client disconnected.\n");
   }
 
   close(server_fd);

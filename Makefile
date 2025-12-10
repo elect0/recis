@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -I include
 
 TARGET = server
 
-SRC = src/server.c
+SRC = $(wildcard src/*.c)
 
 all:
 				$(CC) $(CFLAGS) $(SRC) -o $(TARGET)
