@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "../include/list.h"
 #include "../include/redis.h"
 
 #define PORT 6379
@@ -143,26 +144,69 @@ int main() {
             } else {
               r_obj *o = hash_table_get(db, key);
 
-              char *msg;
               if (o == NULL) {
-                msg = "Error: Couldn't find your value based on the key\r\n";
-              } else {
+                char *msg =
+                    "Error: Couldn't find your value based on the key\r\n";
+                write(current_fd, msg, strlen(msg));
+              } else if (o->type == STRING) {
                 char *val = (char *)o->data;
                 write(current_fd, val, strlen(val));
-                msg = "Found.";
+                write(current_fd, "\r\n", 2);
+              } else if(o->type == LIST) {
+                List *list = (List *)o->data;
+
+                write(current_fd, "[", 1);
+                
+                ListNode *node = list->head;
+                while(node) {
+                  char *value = (char *)node->value;
+                  write(current_fd, value, strlen(value));
+
+                  if(node->next) write(current_fd, ", ", 2);
+                  node = node->next;
+                }
+                write(current_fd, "]\r\n", 3);
+              } else {
+                char *err = "-ERR unknown type\r\n";
+                write(current_fd, err, strlen(err));
               }
+            }
+          }  else if (strcmp(command, "LPUSH") == 0) {
+          char *key = strtok(NULL, " \r\n");
+          char *value = strtok(NULL, " \r\n");
+
+          if (!key || !value) {
+            char *msg = "-ERR args\r\n";
+            write(current_fd, msg, strlen(msg));
+          } else {
+            r_obj *o = hash_table_get(db, key);
+
+            if (!o) {
+              o = create_list_object();
+              hash_table_set(db, key, o);
+            }
+
+            if (o->type != LIST) {
+              char *msg = "-WRONGTYPE\r\n";
+              write(current_fd, msg, strlen(msg));
+            } else {
+              list_ins_node_head((List *)o->data, strdup(value));
+
+              char *msg = "+OK\r\n";
               write(current_fd, msg, strlen(msg));
             }
           }
-        } else {
-          epoll_ctl(epfd, EPOLL_CTL_DEL, current_fd, NULL);
-          close(current_fd);
-          printf("client dissconnected: FD :%d", current_fd);
         }
+      }
+      else {
+        epoll_ctl(epfd, EPOLL_CTL_DEL, current_fd, NULL);
+        close(current_fd);
+        printf("client dissconnected: FD :%d", current_fd);
       }
     }
   }
+}
 
-  close(server_fd);
-  return 0;
+close(server_fd);
+return 0;
 }

@@ -22,6 +22,7 @@ typedef struct {
 } HashTable;
 
 r_obj *create_string_object(const char *str);
+r_obj *create_list_object(void);
 void free_object(r_obj *o);
 
 HashTable *hash_table_create(size_t size);

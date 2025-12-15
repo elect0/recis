@@ -1,3 +1,4 @@
+#include "../include/list.h"
 #include "../include/redis.h"
 #include "string.h"
 #include <stdio.h>
@@ -42,6 +43,23 @@ r_obj *create_string_object(const char *str) {
   }
   o->type = STRING;
   o->data = strdup(str);
+
+  return o;
+}
+
+r_obj *create_list_object() {
+  r_obj *o;
+  if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL) {
+    return NULL;
+  }
+
+  o->type = LIST;
+  o->data = list_create();
+
+  if (o->data == NULL) {
+    free(o);
+    return NULL;
+  }
 
   return o;
 }
@@ -91,7 +109,13 @@ r_obj *hash_table_get(HashTable *hash_table, const char *key) {
 void free_object(r_obj *o) {
   if (o == NULL)
     return;
-  if (o->data)
+  if (o->type == STRING) {
     free(o->data);
+  }
+  else if(o->type == LIST) {
+    // list_free
+    free(o->data);
+  }
+
   free(o);
 }
