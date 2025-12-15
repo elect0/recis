@@ -1,4 +1,4 @@
-#include "../include/hash_table.h"
+#include "../include/redis.h"
 #include "string.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,6 +47,8 @@ r_obj *create_string_object(const char *str) {
 }
 
 void hash_table_set(HashTable *hash_table, const char *key, r_obj *val) {
+  printf("DEBUG: Setting1231 key '%s'\n", key);
+
   unsigned int slot = hash(key) % hash_table->size;
 
   Node *entry = hash_table->buckets[slot];

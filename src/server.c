@@ -9,7 +9,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "../include/hash_table.h"
+#include "../include/redis.h"
 
 #define PORT 6379
 #define BUFFER_SIZE 1024
@@ -149,7 +149,7 @@ int main() {
               } else {
                 char *val = (char *)o->data;
                 write(current_fd, val, strlen(val));
-                msg = "Found.\r\n";
+                msg = "Found.";
               }
               write(current_fd, msg, strlen(msg));
             }
