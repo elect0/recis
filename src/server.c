@@ -152,17 +152,18 @@ int main() {
                 char *val = (char *)o->data;
                 write(current_fd, val, strlen(val));
                 write(current_fd, "\r\n", 2);
-              } else if(o->type == LIST) {
+              } else if (o->type == LIST) {
                 List *list = (List *)o->data;
 
                 write(current_fd, "[", 1);
-                
+
                 ListNode *node = list->head;
-                while(node) {
+                while (node) {
                   char *value = (char *)node->value;
                   write(current_fd, value, strlen(value));
 
-                  if(node->next) write(current_fd, ", ", 2);
+                  if (node->next)
+                    write(current_fd, ", ", 2);
                   node = node->next;
                 }
                 write(current_fd, "]\r\n", 3);
@@ -171,42 +172,75 @@ int main() {
                 write(current_fd, err, strlen(err));
               }
             }
-          }  else if (strcmp(command, "LPUSH") == 0) {
-          char *key = strtok(NULL, " \r\n");
-          char *value = strtok(NULL, " \r\n");
+          } else if (strcmp(command, "LPUSH") == 0) {
+            char *key = strtok(NULL, " \r\n");
+            char *value = strtok(NULL, " \r\n");
 
-          if (!key || !value) {
-            char *msg = "-ERR args\r\n";
-            write(current_fd, msg, strlen(msg));
-          } else {
-            r_obj *o = hash_table_get(db, key);
-
-            if (!o) {
-              o = create_list_object();
-              hash_table_set(db, key, o);
-            }
-
-            if (o->type != LIST) {
-              char *msg = "-WRONGTYPE\r\n";
+            if (!key || !value) {
+              char *msg = "-ERR args\r\n";
               write(current_fd, msg, strlen(msg));
             } else {
-              list_ins_node_head((List *)o->data, strdup(value));
+              r_obj *o = hash_table_get(db, key);
 
-              char *msg = "+OK\r\n";
+              if (!o) {
+                o = create_list_object();
+                hash_table_set(db, key, o);
+              }
+
+              if (o->type != LIST) {
+                char *msg = "-WRONGTYPE\r\n";
+                write(current_fd, msg, strlen(msg));
+              } else {
+                list_ins_node_head((List *)o->data, strdup(value));
+
+                char *msg = "+OK\r\n";
+                write(current_fd, msg, strlen(msg));
+              }
+            }
+          } else if (strcmp(command, "RPOP") == 0) {
+            char *key = strtok(NULL, " \r\n");
+
+            if (!key) {
+              char *msg = "-ERR args\r\n";
               write(current_fd, msg, strlen(msg));
+            } else {
+              r_obj *o = hash_table_get(db, key);
+
+              if(!o) {
+                char *msg = "(nil)\r\n";
+                write(current_fd, msg, strlen(msg));
+              }
+
+              if (o->type != LIST) {
+                char *msg = "-WRONGTYPE\r\n";
+                write(current_fd, msg, strlen(msg));
+              } else {
+                List *list = (List *)o->data;
+                char *val = (char *)list_pop_tail(list);
+
+                if(val) {
+                  write(current_fd, val, strlen(val));
+                  write(current_fd, "\r\n", 2);
+
+                  free(val);
+                } else {
+                 
+   char *msg = "(nil)\r\n";
+                write(current_fd, msg, strlen(msg));
+
+                }
+              }
             }
           }
+        } else {
+          epoll_ctl(epfd, EPOLL_CTL_DEL, current_fd, NULL);
+          close(current_fd);
+          printf("client dissconnected: FD :%d", current_fd);
         }
-      }
-      else {
-        epoll_ctl(epfd, EPOLL_CTL_DEL, current_fd, NULL);
-        close(current_fd);
-        printf("client dissconnected: FD :%d", current_fd);
       }
     }
   }
-}
 
-close(server_fd);
-return 0;
+  close(server_fd);
+  return 0;
 }

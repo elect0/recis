@@ -59,3 +59,24 @@ int list_ins_node_tail(List *list, const void *value) {
   list->size++;
   return 0;
 }
+
+void *list_pop_tail(List *list) {
+  if (list_size(list) == 0)
+    return NULL;
+
+  ListNode *node = list->tail;
+  void *value = node->value;
+
+  if (list->head == list->tail) {
+    list->head = NULL;
+    list->tail = NULL;
+  } else {
+    list->tail = node->prev;
+    list->tail->next = NULL;
+  }
+
+  free(node);
+  list->size--;
+
+  return value;
+}
