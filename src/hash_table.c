@@ -64,6 +64,19 @@ r_obj *create_list_object() {
   return o;
 }
 
+r_obj *create_int_object(long long value) {
+  r_obj *o;
+  if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL) {
+    return NULL;
+  }
+
+  o->type = INT;
+  long long *ptr = malloc(sizeof(long long));
+  *ptr = value;
+  o->data = ptr;
+  return o;
+}
+
 void hash_table_set(HashTable *hash_table, const char *key, r_obj *val) {
   printf("DEBUG: Setting1231 key '%s'\n", key);
 
@@ -111,11 +124,38 @@ void free_object(r_obj *o) {
     return;
   if (o->type == STRING) {
     free(o->data);
-  }
-  else if(o->type == LIST) {
+  } else if (o->type == LIST) {
     // list_free
     free(o->data);
   }
 
   free(o);
+}
+
+int hash_table_del(HashTable *hash_table, const char *key) {
+  unsigned int slot = hash(key) % hash_table->size;
+  Node *entry = hash_table->buckets[slot];
+  Node *prev = NULL;
+
+  while (entry) {
+    if (strcmp(entry->key, key) == 0) {
+      if (prev == NULL) {
+        hash_table->buckets[slot] = entry->next;
+      } else {
+        prev->next = entry->next;
+      }
+
+      free(entry->key);
+      free_object(entry->value);
+      free(entry);
+
+      hash_table->count--;
+      return 1;
+    }
+
+    prev = entry;
+    entry = entry->next;
+  }
+
+  return 0;
 }

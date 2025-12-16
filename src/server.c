@@ -7,6 +7,7 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "../include/list.h"
@@ -25,6 +26,26 @@ void set_nonblocking(int fd) {
 
   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
     perror("fcntl F_SETFL");
+  }
+}
+
+long long get_time_ms() { return (long long)time(NULL); }
+
+void active_expire_cycle(HashTable *db, HashTable *expires) {
+  for (int i = 0; (size_t)i < expires->size; i++) {
+    Node *node = expires->buckets[i];
+    while (node) {
+      Node *next = node->next;
+
+      long long *kill_time = (long long *)node->value->data;
+      if (get_time_ms() > *kill_time) {
+        printf("Active expiry: Deleting '%s'\n", node->key);
+        hash_table_del(db, node->key);
+        hash_table_del(expires, node->key);
+      }
+
+      node = next;
+    }
   }
 }
 
@@ -55,6 +76,7 @@ int main() {
   }
 
   HashTable *db = hash_table_create(1024);
+  HashTable *expires = hash_table_create(1024);
 
   set_nonblocking(server_fd);
 
@@ -83,6 +105,9 @@ int main() {
       perror("epoll_wait");
       break;
     }
+
+    // check TTL
+    active_expire_cycle(db, expires);
 
     for (int n = 0; n < nfds; ++n) {
       int current_fd = events[n].data.fd;
@@ -124,7 +149,9 @@ int main() {
 
           if (strcmp(command, "SET") == 0) {
             char *key = strtok(NULL, " \r\n");
-            char *value = strtok(NULL, " \r\n");
+            char *value = strtok(NULL, "\"");
+            char *flag = strtok(NULL, " \r\n");
+            char *seconds = strtok(NULL, " \r\n");
 
             if (key == NULL || value == NULL) {
               char *err = "Error: wrong number of arguments\r\n";
@@ -133,6 +160,12 @@ int main() {
               r_obj *o = create_string_object(value);
               hash_table_set(db, key, o);
 
+              if (flag && strcmp(flag, "EX") == 0 && seconds) {
+                long long seconds_int = atoll(seconds);
+                long long dead_at = get_time_ms() + seconds_int;
+
+                hash_table_set(expires, key, create_int_object(dead_at));
+              }
               char *ok = "+OK\r\n";
               write(current_fd, ok, strlen(ok));
             }
@@ -142,6 +175,19 @@ int main() {
               char *err = "Error: wrong number of arguments\r\n";
               write(current_fd, err, strlen(err));
             } else {
+              r_obj *exp_obj = hash_table_get(expires, key);
+              if (exp_obj) {
+                long long *kill_time = (long long *)exp_obj->data;
+                if (get_time_ms() > *kill_time) {
+                  hash_table_del(db, key);
+                  hash_table_del(expires, key);
+
+                  char *msg = "(nil)\r\n";
+                  write(current_fd, msg, strlen(msg));
+                  continue;
+                }
+              }
+
               r_obj *o = hash_table_get(db, key);
 
               if (o == NULL) {
@@ -206,7 +252,7 @@ int main() {
             } else {
               r_obj *o = hash_table_get(db, key);
 
-              if(!o) {
+              if (!o) {
                 char *msg = "(nil)\r\n";
                 write(current_fd, msg, strlen(msg));
               }
@@ -218,16 +264,14 @@ int main() {
                 List *list = (List *)o->data;
                 char *val = (char *)list_pop_tail(list);
 
-                if(val) {
+                if (val) {
                   write(current_fd, val, strlen(val));
                   write(current_fd, "\r\n", 2);
 
                   free(val);
                 } else {
-                 
-   char *msg = "(nil)\r\n";
-                write(current_fd, msg, strlen(msg));
-
+                  char *msg = "(nil)\r\n";
+                  write(current_fd, msg, strlen(msg));
                 }
               }
             }
