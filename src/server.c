@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "../include/list.h"
+#include "../include/parser.h"
 #include "../include/redis.h"
 
 #define PORT 6379
@@ -142,138 +143,164 @@ int main() {
 
         if (valread > 0) {
           buffer[valread] = '\0';
-          printf("Received: %s\n", buffer);
-          char *command = strtok(buffer, " \r\n");
-          if (command == NULL)
-            continue;
 
-          if (strcmp(command, "SET") == 0) {
-            char *key = strtok(NULL, " \r\n");
-            char *value = strtok(NULL, "\"");
-            char *flag = strtok(NULL, " \r\n");
-            char *seconds = strtok(NULL, " \r\n");
+          char *arg_values[10] = {0};
+          int arg_count = parse_resp_request(buffer, valread, arg_values, 10);
 
-            if (key == NULL || value == NULL) {
-              char *err = "Error: wrong number of arguments\r\n";
-              write(current_fd, err, strlen(err));
-            } else {
-              r_obj *o = create_string_object(value);
-              hash_table_set(db, key, o);
+          if (arg_count > 0) {
+            if (strcasecmp(arg_values[0], "SET") == 0) {
+              if (arg_count >= 3) {
+                r_obj *o = create_string_object(arg_values[2]);
+                hash_table_set(db, arg_values[1], o);
 
-              if (flag && strcmp(flag, "EX") == 0 && seconds) {
-                long long seconds_int = atoll(seconds);
-                long long dead_at = get_time_ms() + seconds_int;
-
-                hash_table_set(expires, key, create_int_object(dead_at));
-              }
-              char *ok = "+OK\r\n";
-              write(current_fd, ok, strlen(ok));
-            }
-          } else if (strcmp(command, "GET") == 0) {
-            char *key = strtok(NULL, " \r\n");
-            if (key == NULL) {
-              char *err = "Error: wrong number of arguments\r\n";
-              write(current_fd, err, strlen(err));
-            } else {
-              r_obj *exp_obj = hash_table_get(expires, key);
-              if (exp_obj) {
-                long long *kill_time = (long long *)exp_obj->data;
-                if (get_time_ms() > *kill_time) {
-                  hash_table_del(db, key);
-                  hash_table_del(expires, key);
-
-                  char *msg = "(nil)\r\n";
-                  write(current_fd, msg, strlen(msg));
-                  continue;
+                if (arg_count >= 5 && strcasecmp(arg_values[3], "EX") == 0) {
+                  long long t = get_time_ms() + atoll(arg_values[4]);
+                  hash_table_set(expires, arg_values[1], create_int_object(t));
                 }
+
+                write(current_fd, "+OK\r\n", 5);
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
               }
+            } else if (strcasecmp(arg_values[0], "GET") == 0) {
+              if (arg_count >= 2) {
+                r_obj *exp_obj = hash_table_get(expires, arg_values[1]);
+                if (exp_obj) {
+                  long long *kill_time = (long long *)exp_obj->data;
+                  if (get_time_ms() > *kill_time) {
+                    hash_table_del(db, arg_values[1]);
+                    hash_table_del(expires, arg_values[1]);
 
-              r_obj *o = hash_table_get(db, key);
-
-              if (o == NULL) {
-                char *msg =
-                    "Error: Couldn't find your value based on the key\r\n";
-                write(current_fd, msg, strlen(msg));
-              } else if (o->type == STRING) {
-                char *val = (char *)o->data;
-                write(current_fd, val, strlen(val));
-                write(current_fd, "\r\n", 2);
-              } else if (o->type == LIST) {
-                List *list = (List *)o->data;
-
-                write(current_fd, "[", 1);
-
-                ListNode *node = list->head;
-                while (node) {
-                  char *value = (char *)node->value;
-                  write(current_fd, value, strlen(value));
-
-                  if (node->next)
-                    write(current_fd, ", ", 2);
-                  node = node->next;
+                    write(current_fd, "$-1\r\n", 5);
+                    continue;
+                  }
                 }
-                write(current_fd, "]\r\n", 3);
-              } else {
-                char *err = "-ERR unknown type\r\n";
-                write(current_fd, err, strlen(err));
-              }
-            }
-          } else if (strcmp(command, "LPUSH") == 0) {
-            char *key = strtok(NULL, " \r\n");
-            char *value = strtok(NULL, " \r\n");
+                r_obj *o = hash_table_get(db, arg_values[1]);
 
-            if (!key || !value) {
-              char *msg = "-ERR args\r\n";
-              write(current_fd, msg, strlen(msg));
-            } else {
-              r_obj *o = hash_table_get(db, key);
+                if (o == NULL) {
+                  write(current_fd, "$-1\r\n", 5);
+                } else if (o->type == STRING) {
+                  char *val = (char *)o->data;
+                  int len = strlen(val);
 
-              if (!o) {
-                o = create_list_object();
-                hash_table_set(db, key, o);
-              }
+                  char header[32];
+                  sprintf(header, "$%d\r\n", len);
 
-              if (o->type != LIST) {
-                char *msg = "-WRONGTYPE\r\n";
-                write(current_fd, msg, strlen(msg));
-              } else {
-                list_ins_node_head((List *)o->data, strdup(value));
+                  write(current_fd, header, strlen(header));
+                  write(current_fd, val, len);
+                  write(current_fd, "\r\n", 2);
+                } else if (o->type == LIST) {
+                  List *list = (List *)o->data;
 
-                char *msg = "+OK\r\n";
-                write(current_fd, msg, strlen(msg));
-              }
-            }
-          } else if (strcmp(command, "RPOP") == 0) {
-            char *key = strtok(NULL, " \r\n");
+                  size_t total_len = 2;
 
-            if (!key) {
-              char *msg = "-ERR args\r\n";
-              write(current_fd, msg, strlen(msg));
-            } else {
-              r_obj *o = hash_table_get(db, key);
+                  ListNode *node = list->head;
+                  while (node != NULL) {
+                    char *val = (char *)node->value;
+                    total_len += strlen(val);
 
-              if (!o) {
-                char *msg = "(nil)\r\n";
-                write(current_fd, msg, strlen(msg));
-              }
+                    if (node->next) {
+                      total_len += 2; // add 2 bytes for comma (", ") separator
+                    }
+                    node = node->next;
+                  }
 
-              if (o->type != LIST) {
-                char *msg = "-WRONGTYPE\r\n";
-                write(current_fd, msg, strlen(msg));
-              } else {
-                List *list = (List *)o->data;
-                char *val = (char *)list_pop_tail(list);
+                  char *output_str =
+                      malloc(total_len + 1); //  + 1 for null termiantor
+                  if (output_str == NULL) {
+                    perror("malloc failed in GET list");
+                    return 1;
+                  }
 
-                if (val) {
-                  write(current_fd, val, strlen(val));
+                  char *ptr = output_str;
+                  *ptr++ = '[';
+
+                  node = list->head;
+                  while (node != NULL) {
+                    char *val = (char *)node->value;
+                    size_t vlen = strlen(val);
+
+                    memcpy(ptr, val, vlen);
+                    ptr += vlen;
+
+                    if (node->next) {
+                      *ptr++ = ',';
+                      *ptr++ = ' ';
+                    }
+
+                    node = node->next;
+                  }
+
+                  *ptr++ = ']';
+                  *ptr++ = '\0';
+
+                  char header[32];
+                  sprintf(header, "$%lu\r\n", total_len);
+
+                  write(current_fd, header, strlen(header));
+                  write(current_fd, output_str, total_len);
                   write(current_fd, "\r\n", 2);
 
-                  free(val);
-                } else {
-                  char *msg = "(nil)\r\n";
+                  free(output_str);
+                }
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
+              }
+            } else if (strcmp(arg_values[0], "LPUSH") == 0) {
+              if (arg_count >= 3) {
+                r_obj *o = hash_table_get(db, arg_values[1]);
+
+                if (!o) {
+                  o = create_list_object();
+                  hash_table_set(db, arg_values[1], o);
+                }
+
+                if (o->type != LIST) {
+                  char *msg = "-WRONGTYPE Operation against a key holding "
+                              "the wrong kind of value\r\n";
                   write(current_fd, msg, strlen(msg));
+                } else {
+                  list_ins_node_head((List *)o->data, strdup(arg_values[2]));
+
+                  write(current_fd, "+OK\r\n", 5);
+                }
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
+              }
+            } else if (strcmp(arg_values[0], "RPOP") == 0) {
+              if (arg_count >= 2) {
+                r_obj *o = hash_table_get(db, arg_values[1]);
+
+                if (!o) {
+                  write(current_fd, "$-1\r\n", 5);
+                } else if (o->type != LIST) {
+                  char *msg = "-WRONGTYPE Operation against a key holding "
+                              "the wrong kind of value\r\n";
+                  write(current_fd, msg, strlen(msg));
+                } else {
+                  List *list = (List *)o->data;
+                  char *val = (char *)list_pop_tail(list);
+
+                  if (val) {
+                    int len = strlen(val);
+
+                    char header[32];
+                    sprintf(header, "$%d\r\n", len);
+
+                    write(current_fd, header, strlen(header));
+                    write(current_fd, val, strlen(val));
+                    write(current_fd, "\r\n", 2);
+
+                    free(val);
+                  } else {
+                    write(current_fd, "$-1\r\n", 5);
+                  }
                 }
               }
+            }
+
+            for (int i = 0; i < arg_count; i++) {
+              free(arg_values[i]);
             }
           }
         } else {
