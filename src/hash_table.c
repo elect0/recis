@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-
 unsigned long hash(const char *key) {
   unsigned int val = 0;
   const char *ptr = key;
@@ -19,6 +18,35 @@ unsigned long hash(const char *key) {
     ptr++;
   }
   return val;
+}
+
+static void hash_table_resize(HashTable *hash_table) {
+  size_t new_size = hash_table->size * 2;
+
+  Node **new_buckets = calloc(new_size, sizeof(Node *));
+  if (new_buckets == NULL)
+    return;
+
+  for (size_t i = 0; i < hash_table->size; i++) {
+    Node *node = hash_table->buckets[i];
+    while (node) {
+      Node *next_node = node->next;
+
+      unsigned int new_index = hash((const char *)node->key) % new_size;
+
+      node->next = new_buckets[new_index];
+      new_buckets[new_index] = node;
+
+      node = next_node;
+    }
+  }
+
+  free(hash_table->buckets);
+
+  hash_table->buckets = new_buckets;
+  hash_table->size = new_size;
+
+  return;
 }
 
 HashTable *hash_table_create(size_t size) {
@@ -61,7 +89,10 @@ r_obj *create_int_object(long long value) {
 }
 
 void hash_table_set(HashTable *hash_table, const char *key, r_obj *val) {
-  printf("DEBUG: Setting1231 key '%s'\n", key);
+
+  if (hash_table->count >= hash_table->size) {
+    hash_table_resize(hash_table);
+  }
 
   unsigned int slot = hash(key) % hash_table->size;
 
@@ -142,33 +173,3 @@ int hash_table_del(HashTable *hash_table, const char *key) {
 
   return 0;
 }
-
-static void hash_table_resize(HashTable *hash_table){
-  size_t new_size = hash_table->size * 2;
-
-  Node **new_buckets = calloc(new_size, sizeof(Node *));
-  if(new_buckets == NULL)
-    return;
-
-  for(size_t i = 0; i < hash_table->size; i++){
-    Node *node = hash_table->buckets[i];
-    while(node){
-      Node *next_node = node->next;
-
-      unsigned int new_index = hash((const char *)node->key) % new_size;
-
-      node->next = new_buckets[new_index];
-      new_buckets[new_index] = node;
-      
-      node = node->next;
-    }
-  }
-
-  free(hash_table->buckets);
-
-  hash_table->buckets = new_buckets;
-  hash_table->size = new_size;
-
-  return;
-}
-
