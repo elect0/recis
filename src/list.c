@@ -1,6 +1,23 @@
 #include "../include/list.h"
 #include "stdlib.h"
 
+r_obj *create_list_object() {
+  r_obj *o;
+  if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL) {
+    return NULL;
+  }
+
+  o->type = LIST;
+  o->data = list_create();
+
+  if (o->data == NULL) {
+    free(o);
+    return NULL;
+  }
+
+  return o;
+}
+
 List *list_create() {
   List *list;
 

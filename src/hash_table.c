@@ -1,8 +1,8 @@
-#include "../include/list.h"
 #include "../include/redis.h"
 #include "string.h"
 #include <stdio.h>
 #include <stdlib.h>
+
 
 unsigned long hash(const char *key) {
   unsigned int val = 0;
@@ -43,23 +43,6 @@ r_obj *create_string_object(const char *str) {
   }
   o->type = STRING;
   o->data = strdup(str);
-
-  return o;
-}
-
-r_obj *create_list_object() {
-  r_obj *o;
-  if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL) {
-    return NULL;
-  }
-
-  o->type = LIST;
-  o->data = list_create();
-
-  if (o->data == NULL) {
-    free(o);
-    return NULL;
-  }
 
   return o;
 }
@@ -159,3 +142,33 @@ int hash_table_del(HashTable *hash_table, const char *key) {
 
   return 0;
 }
+
+static void hash_table_resize(HashTable *hash_table){
+  size_t new_size = hash_table->size * 2;
+
+  Node **new_buckets = calloc(new_size, sizeof(Node *));
+  if(new_buckets == NULL)
+    return;
+
+  for(size_t i = 0; i < hash_table->size; i++){
+    Node *node = hash_table->buckets[i];
+    while(node){
+      Node *next_node = node->next;
+
+      unsigned int new_index = hash((const char *)node->key) % new_size;
+
+      node->next = new_buckets[new_index];
+      new_buckets[new_index] = node;
+      
+      node = node->next;
+    }
+  }
+
+  free(hash_table->buckets);
+
+  hash_table->buckets = new_buckets;
+  hash_table->size = new_size;
+
+  return;
+}
+

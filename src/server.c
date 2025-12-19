@@ -13,6 +13,7 @@
 #include "../include/list.h"
 #include "../include/parser.h"
 #include "../include/redis.h"
+#include "../include/set.h"
 
 #define PORT 6379
 #define BUFFER_SIZE 1024
@@ -300,6 +301,50 @@ int main() {
                   }
                 }
               }
+            } else if (strcasecmp(arg_values[0], "SADD") == 0) {
+              if (arg_count >= 3) {
+                r_obj *o = hash_table_get(db, arg_values[1]);
+
+                if (o == NULL) {
+                  o = create_set_object();
+                  hash_table_set(db, arg_values[1], o);
+                }
+
+                if (o->type != SET) {
+                  char *msg = "-WRONGTYPE Operation against a key holding "
+                              "the wrong kind of value\r\n";
+                  write(current_fd, msg, strlen(msg));
+                } else {
+                  int added =
+                      set_add((HashTable *)o->data, strdup(arg_values[2]));
+
+                  char resp[32];
+                  sprintf(resp, ":%d\r\n", added);
+                  write(current_fd, resp, strlen(resp));
+                }
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
+              }
+            } else if (strcasecmp(arg_values[0], "SISMEMBER") == 0) {
+              if (arg_count >= 3) {
+                r_obj *o = hash_table_get(db, arg_values[1]);
+
+                if (!o) {
+                  write(current_fd, ":0\r\n", 4);
+                } else if (o->type != SET) {
+                  char *err = "-WRONGTYPE Operation against a key holding the "
+                              "wrong kind of value\r\n";
+                  write(current_fd, err, strlen(err));
+                } else {
+                  int is_member =
+                      set_is_member((HashTable *)o->data, arg_values[2]);
+                  char resp[32];
+                  sprintf(resp, ":%d\r\n", is_member);
+                  write(current_fd, resp, strlen(resp));
+                }
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
+              }
             } else if (strcasecmp(arg_values[0], "PING") == 0) {
               write(current_fd, "+PONG\r\n", 7);
             } else {
@@ -308,7 +353,6 @@ int main() {
                        "-ERR unknown command '%s'\r\n", arg_values[0]);
               write(current_fd, err_msg, strlen(err_msg));
             }
-
             printf("Received command: %s\n", arg_values[0]);
 
             for (int i = 0; i < arg_count; i++) {

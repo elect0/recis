@@ -1,6 +1,8 @@
 #ifndef LIST_H
 #define LIST_H
 
+#include "redis.h"
+
 typedef struct ListNode_ {
   void *value;
   struct ListNode_ *next;
@@ -13,6 +15,8 @@ typedef struct List_ {
   ListNode *tail;
   ListNode *head;
 } List;
+
+r_obj *create_list_object(void);
 
 List *list_create(void);
 int list_ins_node_head(List *list, const void *value);
