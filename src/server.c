@@ -145,9 +145,12 @@ int main() {
           buffer[valread] = '\0';
 
           char *arg_values[10] = {0};
+
           int arg_count = parse_resp_request(buffer, valread, arg_values, 10);
 
           if (arg_count > 0) {
+
+            printf("%d", arg_count);
             if (strcasecmp(arg_values[0], "SET") == 0) {
               if (arg_count >= 3) {
                 r_obj *o = create_string_object(arg_values[2]);
@@ -246,7 +249,7 @@ int main() {
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
-            } else if (strcmp(arg_values[0], "LPUSH") == 0) {
+            } else if (strcasecmp(arg_values[0], "LPUSH") == 0) {
               if (arg_count >= 3) {
                 r_obj *o = hash_table_get(db, arg_values[1]);
 
@@ -267,7 +270,7 @@ int main() {
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
-            } else if (strcmp(arg_values[0], "RPOP") == 0) {
+            } else if (strcasecmp(arg_values[0], "RPOP") == 0) {
               if (arg_count >= 2) {
                 r_obj *o = hash_table_get(db, arg_values[1]);
 
@@ -297,11 +300,23 @@ int main() {
                   }
                 }
               }
+            } else if (strcasecmp(arg_values[0], "PING") == 0) {
+              write(current_fd, "+PONG\r\n", 7);
+            } else {
+              char err_msg[64];
+              snprintf(err_msg, sizeof(err_msg),
+                       "-ERR unknown command '%s'\r\n", arg_values[0]);
+              write(current_fd, err_msg, strlen(err_msg));
             }
+
+            printf("Received command: %s\n", arg_values[0]);
 
             for (int i = 0; i < arg_count; i++) {
               free(arg_values[i]);
             }
+          } else {
+            char *err = "-ERR protocol error or incomplete packet\r\n";
+            write(current_fd, err, strlen(err));
           }
         } else {
           epoll_ctl(epfd, EPOLL_CTL_DEL, current_fd, NULL);

@@ -9,8 +9,9 @@ int read_until_crlf(const char *buffer, int input_len, int *pos, char *out,
 
   int i = 0;
   while (*pos < input_len && buffer[*pos] != '\r') {
-    if (buffer[*pos] != '\n')
+    if (buffer[*pos] == '\n') {
       return -1;
+    }
 
     if (i < max_out_len) {
       out[i++] = buffer[*pos];
@@ -19,8 +20,9 @@ int read_until_crlf(const char *buffer, int input_len, int *pos, char *out,
     (*pos)++;
   }
 
-  if (*pos >= input_len)
+  if (*pos >= input_len) {
     return -1;
+  }
 
   if (buffer[*pos] == '\r') {
     if ((*pos + 1) >= input_len || buffer[*pos + 1] != '\n') {
@@ -65,12 +67,13 @@ int parse_resp_request(char *buffer, int len, char **arg_values, int max_args) {
     pos++;
 
     char len_str[32];
-    if (read_until_crlf(buffer,len, &pos, len_str, 32) == -1)
+    if (read_until_crlf(buffer, len, &pos, len_str, 32) == -1)
       return 0;
 
     int arg_len = atoi(len_str);
 
-    if(pos + arg_len + 2 > len) return -1;
+    if (pos + arg_len + 2 > len)
+      return -1;
 
     arg_values[i] = malloc(arg_len + 1);
     memcpy(arg_values[i], buffer + pos, arg_len);
