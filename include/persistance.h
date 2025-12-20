@@ -3,5 +3,6 @@
 #include "redis.h"
 
 void rdb_save(HashTable *db, char *filename);
+void rdb_load(HashTable *db, char *filename);
 
 #endif // !PERSISTANCE_H

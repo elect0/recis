@@ -1,12 +1,14 @@
 #include "../include/persistance.h"
+#include "../include/set.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define RDB_TYPE_STRING 0
 #define RDB_TYPE_LIST 1
 #define RDB_TYPE_SET 2
 
-void rdb_save(HashTable *db, char *filename){
+void rdb_save(HashTable *db, char *filename) {
   FILE *fp = fopen(filename, "wb"); // write binary
   if (!fp) {
     printf("[ERROR] Couldn't open file for writing: %s\n", filename);
@@ -58,4 +60,64 @@ void rdb_save(HashTable *db, char *filename){
   }
   fclose(fp);
   printf("RDB save completed.");
+}
+
+void rdb_load(HashTable *db, char *filename) {
+  FILE *fp = fopen(filename, "rb");
+  if (!fp) {
+    printf("[ERROR] Couldn't open file for reading: %s\n", filename);
+    return;
+  }
+
+  printf("[RDB] Loading data from disk...\n");
+
+
+  unsigned char type;
+  while (fread(&type, sizeof(unsigned char), 1, fp)) {
+    int key_len;
+    fread(&key_len, sizeof(int), 1, fp);
+
+    char *key = (char *)malloc(key_len + 1);
+    fread(key, key_len, 1, fp);
+    key[key_len] = '\0';
+
+    printf("[RDB] Loading key: %s, type: %d\n", key, type);
+
+    if (type == RDB_TYPE_STRING) {
+      int val_len;
+      fread(&val_len, sizeof(int), 1, fp);
+
+      char *val_str = (char *)malloc(val_len + 1);
+      fread(val_str, val_len, 1, fp);
+      val_str[val_len] = '\0';
+
+      r_obj *o = create_string_object(val_str);
+
+      hash_table_set(db, strdup(key), o);
+    } else if (type == RDB_TYPE_SET) {
+      int count;
+      if (fread(&count, sizeof(int), 1, fp) != 1)
+        break;
+
+      r_obj *o = create_set_object();
+
+      for (int i = 0; i < count; i++) {
+        int member_len;
+        fread(&member_len, sizeof(int), 1, fp);
+
+        char *member = (char *)malloc(member_len + 1);
+        fread(member, member_len, 1, fp);
+        member[member_len] = '\0';
+
+        set_add((HashTable *)o->data, member);
+      }
+
+      hash_table_set(db, strdup(key), o);
+    }
+
+    free(key);
+  }
+
+  fclose(fp);
+  printf("RDB data loaded successfully\n");
 }
