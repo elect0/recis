@@ -10,6 +10,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "../include/persistance.h"
 #include "../include/list.h"
 #include "../include/parser.h"
 #include "../include/redis.h"
@@ -345,7 +346,12 @@ int main() {
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
-            } else if (strcasecmp(arg_values[0], "PING") == 0) {
+            } else if(strcasecmp(arg_values[0], "SAVE") == 0){
+              rdb_save(db, "dump.rdb");
+              char *resp = "+OK\r\n";
+              write(current_fd, resp, strlen(resp));
+            }
+            else if (strcasecmp(arg_values[0], "PING") == 0) {
               write(current_fd, "+PONG\r\n", 7);
             } else {
               char err_msg[64];
