@@ -1,4 +1,5 @@
 #include "../include/persistance.h"
+#include "../include/list.h"
 #include "../include/set.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,8 +54,21 @@ void rdb_save(HashTable *db, char *filename) {
             set_node = set_node->next;
           }
         }
+      } else if (val->type == LIST) {
+        List *list = (List *)val->data;
+
+        int size = list->size;
+        fwrite(&size, sizeof(int), 1, fp);
+
+        ListNode *member;
+        for (member = list->head; member != NULL; member = member->next) {
+          char *item = member->value;
+          int item_len = strlen(item);
+
+          fwrite(&item_len, sizeof(int), 1, fp);
+          fwrite(item, item_len, 1, fp);
+        }
       }
-      // todo: add list;
       node = node->next;
     }
   }
@@ -70,7 +84,6 @@ void rdb_load(HashTable *db, char *filename) {
   }
 
   printf("[RDB] Loading data from disk...\n");
-
 
   unsigned char type;
   while (fread(&type, sizeof(unsigned char), 1, fp)) {
@@ -113,6 +126,24 @@ void rdb_load(HashTable *db, char *filename) {
       }
 
       hash_table_set(db, strdup(key), o);
+    } else if (type == RDB_TYPE_LIST) {
+      int size;
+      if (fread(&size, sizeof(int), 1, fp) != 1)
+        break;
+
+      r_obj *o = create_list_object();
+      List *list = (List *)o->data;
+
+      for (int i = 0; i < size; i++) {
+        int val_len;
+        fread(&val_len, sizeof(int), 1, fp);
+
+        char *val_str = malloc(val_len + 1);
+        fread(val_str, val_len, 1, fp);
+        val_str[val_len] = '\0';
+
+        list_ins_node_tail(list, val_str);
+      }
     }
 
     free(key);

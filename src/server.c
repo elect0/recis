@@ -274,6 +274,27 @@ int main() {
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
+            } else if (strcasecmp(arg_values[0], "RPUSH") == 0) {
+              if (arg_count >= 3) {
+                r_obj *o = hash_table_get(db, arg_values[1]);
+
+                if (!o) {
+                  o = create_list_object();
+                  hash_table_set(db, arg_values[1], o);
+                }
+
+                if (o->type != LIST) {
+                  char *msg = "-WRONGTYPE Operation against a key holding "
+                              "the wrong kind of value\r\n";
+                  write(current_fd, msg, strlen(msg));
+                } else {
+                  list_ins_node_tail((List *)o->data, strdup(arg_values[2]));
+
+                  write(current_fd, "+OK\r\n", 5);
+                }
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
+              }
             } else if (strcasecmp(arg_values[0], "RPOP") == 0) {
               if (arg_count >= 2) {
                 r_obj *o = hash_table_get(db, arg_values[1]);
