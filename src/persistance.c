@@ -4,12 +4,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define RDB_TYPE_STRING 0
 #define RDB_TYPE_LIST 1
 #define RDB_TYPE_SET 2
 
-void rdb_save(HashTable *db, char *filename) {
+void rdb_save(HashTable *db, HashTable *expires, char *filename) {
   FILE *fp = fopen(filename, "wb"); // write binary
   if (!fp) {
     printf("[ERROR] Couldn't open file for writing: %s\n", filename);
@@ -22,8 +23,17 @@ void rdb_save(HashTable *db, char *filename) {
       char *key = node->key;
       r_obj *val = (r_obj *)node->value;
 
+      r_obj *expire_entry = hash_table_get(expires, key);
+      long long expire_time = 0;
+
+      if (expire_entry != NULL) {
+        expire_time = (long long)expire_entry->data;
+      }
+
       unsigned char type = (unsigned char)val->type;
       fwrite(&type, sizeof(unsigned char), 1, fp);
+
+      fwrite(&expire_time, sizeof(long long), 1, fp);
 
       int key_len = strlen(key);
       fwrite(&key_len, sizeof(int), 1, fp);
@@ -76,7 +86,7 @@ void rdb_save(HashTable *db, char *filename) {
   printf("RDB save completed.");
 }
 
-void rdb_load(HashTable *db, char *filename) {
+void rdb_load(HashTable *db, HashTable *expires, char *filename) {
   FILE *fp = fopen(filename, "rb");
   if (!fp) {
     printf("[ERROR] Couldn't open file for reading: %s\n", filename);
@@ -87,6 +97,10 @@ void rdb_load(HashTable *db, char *filename) {
 
   unsigned char type;
   while (fread(&type, sizeof(unsigned char), 1, fp)) {
+
+    long long expire_time;
+    fread(&expire_time, sizeof(long long), 1, fp);
+
     int key_len;
     fread(&key_len, sizeof(int), 1, fp);
 
@@ -140,9 +154,23 @@ void rdb_load(HashTable *db, char *filename) {
 
         char *val_str = malloc(val_len + 1);
         fread(val_str, val_len, 1, fp);
+
+
         val_str[val_len] = '\0';
 
         list_ins_node_tail(list, val_str);
+      }
+      hash_table_set(db, strdup(key), o);
+    }
+
+    if (expire_time > 0) {
+      time_t now = time(NULL);
+      long long current_ms = now * 1000;
+
+      if (expire_time < current_ms) {
+        hash_table_del(db, key);
+      } else {
+        hash_table_set(expires, strdup(key), create_int_object(expire_time));
       }
     }
 

@@ -79,9 +79,9 @@ int main() {
   }
 
   HashTable *db = hash_table_create(1024);
-  rdb_load(db, "dump.rdb");
-
   HashTable *expires = hash_table_create(1024);
+
+  rdb_load(db, expires, "dump.rdb");
 
   set_nonblocking(server_fd);
 
@@ -161,7 +161,7 @@ int main() {
                 hash_table_set(db, arg_values[1], o);
 
                 if (arg_count >= 5 && strcasecmp(arg_values[3], "EX") == 0) {
-                  long long t = get_time_ms() + atoll(arg_values[4]);
+                  long long t = get_time_ms() + atoll(arg_values[4]) * 1000;
                   hash_table_set(expires, arg_values[1], create_int_object(t));
                 }
 
@@ -370,7 +370,7 @@ int main() {
                 write(current_fd, "-ERR args\r\n", 11);
               }
             } else if (strcasecmp(arg_values[0], "SAVE") == 0) {
-              rdb_save(db, "dump.rdb");
+              rdb_save(db, expires, "dump.rdb");
               char *resp = "+OK\r\n";
               write(current_fd, resp, strlen(resp));
             } else if (strcasecmp(arg_values[0], "PING") == 0) {
