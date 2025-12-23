@@ -34,6 +34,7 @@ ZSkipList *zsl_create() {
 
   for (j = 0; j < ZSKIPLIST_MAX_LEVEL; j++) {
     zsl->head->level[j].forward = NULL;
+    zsl->head->level[j].span = 0;
   }
 
   zsl->head->backward = NULL;
@@ -44,14 +45,20 @@ ZSkipList *zsl_create() {
 ZSkipListNode *zsl_insert(ZSkipList *zsl, double score, char *element) {
   ZSkipListNode *update[ZSKIPLIST_MAX_LEVEL], *x;
   int i, level;
+  unsigned int rank[ZSKIPLIST_MAX_LEVEL];
 
   x = zsl->head;
 
   for (i = zsl->level - 1; i >= 0; i--) {
+
+    rank[i] = i == (zsl->level - 1) ? 0 : rank[i + 1];
+
     while (x->level[i].forward &&
            (x->level[i].forward->score < score ||
             (x->level[i].forward->score == score &&
              strcmp(x->level[i].forward->element, element) < 0))) {
+
+      rank[i] += x->level[i].span;
       x = x->level[i].forward;
     }
 
@@ -71,6 +78,14 @@ ZSkipListNode *zsl_insert(ZSkipList *zsl, double score, char *element) {
   for (i = 0; i < level; i++) {
     x->level[i].forward = update[i]->level[i].forward;
     update[i]->level[i].forward = x;
+
+    x->level[i].span = update[i]->level[i].span - (rank[0] - rank[i]);
+
+    update[i]->level[i].span = (rank[0] - rank[i]) + 1;
+  }
+
+  for (i = level; i < zsl->level; i++) {
+    update[i]->level[i].span++;
   }
 
   if (update[0] == zsl->head) {
@@ -122,4 +137,27 @@ r_obj *create_zset_object() {
   o->type = ZSET;
   o->data = zset_create();
   return o;
+}
+
+ZSkipListNode *zsl_get_node_at_rank(ZSkipList *zsl, int rank) {
+  ZSkipListNode *x = zsl->head;
+  int traversed = 0;
+
+  while (x->level[0].forward && traversed < rank) {
+    x = x->level[0].forward;
+    traversed++;
+  }
+
+  return x->level[0].forward;
+}
+
+ZSkipListNode *zsl_get_element_by_rank(ZSkipList *zsl, int rank) {
+  ZSkipListNode *x = zsl->head->level[0].forward;
+  int i = 0;
+  while (x && i < rank) {
+    x = x->level[0].forward;
+    i++;
+  }
+
+  return x;
 }

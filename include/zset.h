@@ -8,6 +8,7 @@
 
 typedef struct ZSkipListLevel_ {
   struct ZSkipListNode_ *forward;
+  unsigned long span;
 } ZSkipListLevel;
 
 typedef struct ZSkipListNode_ {
@@ -36,5 +37,8 @@ r_obj *create_zset_object();
 ZSet *zset_create();
 int zset_add(ZSet *zs, char *element, double score);
 void zset_range(ZSet *zs, int min_index, int max_index);
+
+ZSkipListNode *zsl_get_node_at_rank(ZSkipList *zsl, int rank);
+ZSkipListNode *zsl_get_element_by_rank(ZSkipList *zsl, int rank);
 
 #endif // !ZSET_H

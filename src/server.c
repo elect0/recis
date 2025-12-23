@@ -393,6 +393,65 @@ int main() {
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
+            } else if (strcasecmp(arg_values[0], "ZRANGE") == 0) {
+              if (arg_count >= 4) {
+                r_obj *o = hash_table_get(db, arg_values[1]);
+
+                int start = atoi(arg_values[2]);
+                int stop = atoi(arg_values[3]);
+
+                if (!o) {
+                  write(current_fd, "*0\r\n", 4);
+                } else if (o->type != ZSET) {
+                  char *err = "-WRONGTYPE Operation against a key holding the "
+                              "wrong kind of value\r\n";
+                  write(current_fd, err, strlen(err));
+
+                } else {
+                  ZSet *zs = (ZSet *)o->data;
+                  ZSkipList *zsl = zs->zsl;
+
+                  int len = zsl->length;
+
+                  if (start < 0)
+                    start = len + start;
+                  if (stop < 0)
+                    stop = len + stop;
+                  if (start < 0)
+                    start = 0;
+
+                  if (start > stop || start >= len) {
+                    write(current_fd, "*0\r\n", 4);
+                  } else {
+                    if (stop >= len)
+                      stop = len - 1;
+
+                    int range_len = stop - start + 1;
+
+                    char header[32];
+                    sprintf(header, "*%d\r\n", range_len);
+                    write(current_fd, header, strlen(header));
+
+                    ZSkipListNode *node = zsl_get_element_by_rank(zsl, start);
+
+                    while (node && range_len > 0) {
+                      // bulk string : "$len\r\nVal\r\n"
+
+                      char bulk_header[32];
+                      int val_len = strlen(node->element);
+                      sprintf(bulk_header, "$%d\r\n", val_len);
+                      write(current_fd, bulk_header, strlen(bulk_header));
+                      write(current_fd, node->element, val_len);
+                      write(current_fd, "\r\n", 2);
+
+                      node = node->level[0].forward;
+                      range_len--;
+                    }
+                  }
+                }
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
+              }
             } else if (strcasecmp(arg_values[0], "SAVE") == 0) {
               rdb_save(db, expires, "dump.rdb");
               char *resp = "+OK\r\n";
