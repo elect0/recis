@@ -113,3 +113,13 @@ int zset_add(ZSet *zs, char *element, double score) {
 
   return 1;
 }
+
+r_obj *create_zset_object() {
+  r_obj *o;
+  if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL)
+    return NULL;
+
+  o->type = ZSET;
+  o->data = zset_create();
+  return o;
+}

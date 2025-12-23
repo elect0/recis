@@ -15,6 +15,7 @@
 #include "../include/persistance.h"
 #include "../include/redis.h"
 #include "../include/set.h"
+#include "../include/zset.h"
 
 #define PORT 6379
 #define BUFFER_SIZE 1024
@@ -365,6 +366,29 @@ int main() {
                   char resp[32];
                   sprintf(resp, ":%d\r\n", is_member);
                   write(current_fd, resp, strlen(resp));
+                }
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
+              }
+            } else if (strcasecmp(arg_values[0], "ZADD") == 0) {
+              if (arg_count >= 4) {
+                r_obj *o = hash_table_get(db, arg_values[1]);
+
+                if (!o) {
+                  o = create_zset_object();
+                  hash_table_set(db, arg_values[1], o);
+                } else if (o->type != ZSET) {
+                  char *err = "-WRONGTYPE Operation against a key holding the "
+                              "wrong kind of value\r\n";
+                  write(current_fd, err, strlen(err));
+                } else {
+                  int added = zset_add((ZSet *)o->data, arg_values[3],
+                                       atof(arg_values[2]));
+                  if (added) {
+                    write(current_fd, ":1\r\n", 4);
+                  } else {
+                    write(current_fd, ":0\r\n", 4);
+                  }
                 }
               } else {
                 write(current_fd, "-ERR args\r\n", 11);

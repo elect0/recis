@@ -8,7 +8,8 @@ typedef enum {
   SET = 2,
   HASH = 3,
   INT = 4,
-  DOUBLE = 5
+  DOUBLE = 5,
+  ZSET = 6,
 } obj_type;
 
 typedef struct RObj {

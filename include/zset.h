@@ -31,6 +31,8 @@ typedef struct ZSet_ {
   ZSkipList *zsl;
 } ZSet;
 
+r_obj *create_zset_object();
+
 ZSet *zset_create();
 int zset_add(ZSet *zs, char *element, double score);
 void zset_range(ZSet *zs, int min_index, int max_index);
