@@ -88,6 +88,18 @@ r_obj *create_int_object(long long value) {
   return o;
 }
 
+r_obj *create_double_object(double value) {
+  r_obj *o;
+  if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL)
+    return NULL;
+
+  o->type = DOUBLE;
+  double *ptr = malloc(sizeof(double));
+  *ptr = value;
+  o->data = ptr;
+  return o;
+}
+
 void hash_table_set(HashTable *hash_table, const char *key, r_obj *val) {
 
   if (hash_table->count >= hash_table->size) {
