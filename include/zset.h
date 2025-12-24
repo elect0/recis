@@ -40,5 +40,6 @@ void zset_range(ZSet *zs, int min_index, int max_index);
 
 ZSkipListNode *zsl_get_node_at_rank(ZSkipList *zsl, int rank);
 ZSkipListNode *zsl_get_element_by_rank(ZSkipList *zsl, int rank);
+unsigned long zsl_get_rank(ZSkipList *zsl, double score, char *element);
 
 #endif // !ZSET_H

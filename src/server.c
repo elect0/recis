@@ -381,14 +381,13 @@ int main() {
                   char *err = "-WRONGTYPE Operation against a key holding the "
                               "wrong kind of value\r\n";
                   write(current_fd, err, strlen(err));
+                }
+                int added = zset_add((ZSet *)o->data, arg_values[3],
+                                     atof(arg_values[2]));
+                if (added) {
+                  write(current_fd, ":1\r\n", 4);
                 } else {
-                  int added = zset_add((ZSet *)o->data, arg_values[3],
-                                       atof(arg_values[2]));
-                  if (added) {
-                    write(current_fd, ":1\r\n", 4);
-                  } else {
-                    write(current_fd, ":0\r\n", 4);
-                  }
+                  write(current_fd, ":0\r\n", 4);
                 }
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
@@ -452,6 +451,42 @@ int main() {
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
+            } else if (strcasecmp(arg_values[0], "ZRANK") == 0) {
+              if (arg_count >= 3) {
+                r_obj *o = hash_table_get(db, arg_values[1]);
+                if (!o) {
+                  write(current_fd, "$-1\r\n", 5);
+                } else if (o->type != ZSET) {
+                  char *err = "-WRONGTYPE Operation against a key holding the "
+                              "wrong kind of value\r\n";
+                  write(current_fd, err, strlen(err));
+                } else {
+                  ZSet *zs = (ZSet *)o->data;
+
+                  r_obj *score_o = hash_table_get(zs->dict, arg_values[2]);
+                  if (!score_o) {
+                    write(current_fd, "$-1\r\n", 5);
+                  } else {
+                    double score = *(double *)score_o->data;
+                    printf("scoru : %lf\r\n", score);
+
+                    unsigned long rank =
+                        zsl_get_rank(zs->zsl, score, arg_values[2]);
+
+                    if (rank > 0) {
+                      rank--;
+                      char resp[32];
+                      sprintf(resp, ":%lu\r\n", rank);
+                      write(current_fd, resp, strlen(resp));
+                    } else {
+                      write(current_fd, "$-1\r\n", 5);
+                    }
+                  }
+                }
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
+              }
+
             } else if (strcasecmp(arg_values[0], "SAVE") == 0) {
               rdb_save(db, expires, "dump.rdb");
               char *resp = "+OK\r\n";

@@ -69,7 +69,9 @@ ZSkipListNode *zsl_insert(ZSkipList *zsl, double score, char *element) {
 
   if (level > zsl->level) {
     for (i = zsl->level; i < level; i++) {
+      rank[i] = 0;
       update[i] = zsl->head;
+      update[i]->level[i].span = zsl->length;
     }
     zsl->level = level;
   }
@@ -160,4 +162,26 @@ ZSkipListNode *zsl_get_element_by_rank(ZSkipList *zsl, int rank) {
   }
 
   return x;
+}
+
+unsigned long zsl_get_rank(ZSkipList *zsl, double score, char *element) {
+  ZSkipListNode *x = zsl->head;
+  unsigned long rank = 0;
+  int i;
+
+  for (i = zsl->level; i >= 0; i--) {
+    while (x->level[i].forward &&
+           (x->level[i].forward->score < score ||
+            (x->level[i].forward->score == score &&
+             strcmp(x->level[i].forward->element, element) <= 0))) {
+
+      rank += x->level[i].span;
+      x = x->level[i].forward;
+
+      if (x->score == score && strcmp(x->element, element) == 0)
+        return rank;
+    }
+  }
+
+  return 0;
 }
