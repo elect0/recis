@@ -1,6 +1,7 @@
 #include "../include/persistance.h"
 #include "../include/list.h"
 #include "../include/set.h"
+#include "../include/zset.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +10,7 @@
 #define RDB_TYPE_STRING 0
 #define RDB_TYPE_LIST 1
 #define RDB_TYPE_SET 2
+#define RDB_TYPE_ZSET 6
 
 void rdb_save(HashTable *db, HashTable *expires, char *filename) {
   FILE *fp = fopen(filename, "wb"); // write binary
@@ -77,6 +79,23 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
 
           fwrite(&item_len, sizeof(int), 1, fp);
           fwrite(item, item_len, 1, fp);
+        }
+      } else if (val->type == ZSET) {
+        ZSet *zs = (ZSet *)val->data;
+        ZSkipList *zsl = zs->zsl;
+
+        unsigned int length = zsl->length;
+        fwrite(&length, sizeof(unsigned int), 1, fp);
+
+        ZSkipListNode *node = zsl->head->level[0].forward;
+        while (node) {
+          int mem_len = strlen(node->element);
+          fwrite(&mem_len, sizeof(int), 1, fp);
+          fwrite(node->element, mem_len, 1, fp);
+
+          fwrite(&node->score, sizeof(double), 1, fp);
+
+          node = node->level[0].forward;
         }
       }
       node = node->next;
@@ -155,12 +174,36 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
         char *val_str = malloc(val_len + 1);
         fread(val_str, val_len, 1, fp);
 
-
         val_str[val_len] = '\0';
 
         list_ins_node_tail(list, val_str);
       }
       hash_table_set(db, strdup(key), o);
+    } else if (type == RDB_TYPE_ZSET) {
+      unsigned int length;
+      if (fread(&length, sizeof(unsigned int), 1, fp) != 1)
+        break;
+
+
+      r_obj *o = create_zset_object();
+      ZSet *zs = (ZSet *)o->data;
+
+      for (unsigned int i = 0; i < length; i++) {
+        int mem_len;
+        fread(&mem_len, sizeof(int), 1, fp);
+        char *member = malloc(mem_len + 1);
+        fread(member, mem_len, 1, fp);
+        member[mem_len] = '\0';
+
+        double score;
+        fread(&score, sizeof(double), 1, fp);
+
+        zset_add(zs, member, score);
+
+        free(member);
+
+        hash_table_set(db, strdup(key), o);
+      }
     }
 
     if (expire_time > 0) {
