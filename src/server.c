@@ -33,7 +33,7 @@ void set_nonblocking(int fd) {
   }
 }
 
-long long get_time_ms() { return (long long)time(NULL); }
+long long get_time_s() { return (long long)time(NULL); }
 
 void active_expire_cycle(HashTable *db, HashTable *expires) {
   for (int i = 0; (size_t)i < expires->size; i++) {
@@ -42,7 +42,7 @@ void active_expire_cycle(HashTable *db, HashTable *expires) {
       Node *next = node->next;
 
       long long *kill_time = (long long *)node->value->data;
-      if (get_time_ms() > *kill_time) {
+      if (get_time_s() > *kill_time) {
         printf("Active expiry: Deleting '%s'\n", node->key);
         hash_table_del(db, node->key);
         hash_table_del(expires, node->key);
@@ -169,7 +169,9 @@ int main() {
                 hash_table_set(db, arg_values[1], o);
 
                 if (arg_count >= 5 && strcasecmp(arg_values[3], "EX") == 0) {
-                  long long t = get_time_ms() + atoll(arg_values[4]) * 1000;
+                  printf("EXPIRARE MATII %lld", atoll(arg_values[4]));
+                  long long t = get_time_s() + atoll(arg_values[4]);
+                  printf("T PE MATA %lld", t);
                   hash_table_set(expires, arg_values[1], create_int_object(t));
                 }
 
@@ -182,7 +184,7 @@ int main() {
                 r_obj *exp_obj = hash_table_get(expires, arg_values[1]);
                 if (exp_obj) {
                   long long *kill_time = (long long *)exp_obj->data;
-                  if (get_time_ms() > *kill_time) {
+                  if (get_time_s() > *kill_time) {
                     hash_table_del(db, arg_values[1]);
                     hash_table_del(expires, arg_values[1]);
 
@@ -280,6 +282,24 @@ int main() {
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
+            } else if (strcasecmp(arg_values[0], "TTL") == 0) {
+              if (arg_count >= 2) {
+                if (hash_table_get(db, arg_values[1]) == NULL) {
+                  write(current_fd, ":-2\r\n", 5);
+                } else {
+                  r_obj *ttl = hash_table_get(expires, arg_values[1]);
+                  if (ttl == NULL) {
+                    write(current_fd, ":-1\r\n", 5);
+                  } else if (ttl->data != NULL) {
+                    char resp[32];
+                    long long seconds = *(long long *)ttl->data - get_time_s();
+                    sprintf(resp, ":%lld\r\n", seconds);
+
+                    write(current_fd, resp, strlen(resp));
+                  }
+                }
+              }
+
             } else if (strcasecmp(arg_values[0], "LPUSH") == 0) {
               if (arg_count >= 3) {
                 r_obj *o = hash_table_get(db, arg_values[1]);
