@@ -42,6 +42,21 @@ ZSkipList *zsl_create() {
   return zsl;
 }
 
+void zsl_destroy(ZSkipList *zsl) {
+  ZSkipListNode *node = zsl->head->level[0].forward;
+  ZSkipListNode *next;
+
+  while (node) {
+    next = node->level[0].forward;
+    free(node->element);
+    free(node);
+    node = next;
+  }
+
+  free(zsl->head);
+  free(zsl);
+}
+
 ZSkipListNode *zsl_insert(ZSkipList *zsl, double score, char *element) {
   ZSkipListNode *update[ZSKIPLIST_MAX_LEVEL], *x;
   int i, level;
@@ -114,6 +129,13 @@ ZSet *zset_create() {
   zs->dict = hash_table_create(16);
   zs->zsl = zsl_create();
   return zs;
+}
+
+void zset_destroy(ZSet *zs) {
+  zsl_destroy(zs->zsl);
+  hash_table_destroy(zs->dict);
+
+  free(zs);
 }
 
 int zset_add(ZSet *zs, char *element, double score) {

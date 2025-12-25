@@ -1,5 +1,7 @@
 #include "../include/list.h"
 #include "stdlib.h"
+#include <stdio.h>
+#include <string.h>
 
 r_obj *create_list_object() {
   r_obj *o;
@@ -96,4 +98,22 @@ void *list_pop_tail(List *list) {
   list->size--;
 
   return value;
+}
+
+void list_destroy(List *list) {
+
+  if (list == NULL)
+    return;
+
+  while (list->size > 0) {
+    void *value = list_pop_tail(list);
+
+    if (value) {
+
+      printf("Sterg pointerul: %p\n", value); // Ve
+      free(value);
+    }
+  }
+
+  free(list);
 }

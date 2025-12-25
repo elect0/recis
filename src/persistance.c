@@ -184,7 +184,6 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
       if (fread(&length, sizeof(unsigned int), 1, fp) != 1)
         break;
 
-
       r_obj *o = create_zset_object();
       ZSet *zs = (ZSet *)o->data;
 

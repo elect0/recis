@@ -37,6 +37,7 @@ r_obj *create_zset_object();
 ZSet *zset_create();
 int zset_add(ZSet *zs, char *element, double score);
 void zset_range(ZSet *zs, int min_index, int max_index);
+void zset_destroy(ZSet *zs);
 
 ZSkipListNode *zsl_get_node_at_rank(ZSkipList *zsl, int rank);
 ZSkipListNode *zsl_get_element_by_rank(ZSkipList *zsl, int rank);

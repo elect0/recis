@@ -1,4 +1,7 @@
+#include "../include/list.h"
 #include "../include/redis.h"
+#include "../include/set.h"
+#include "../include/zset.h"
 #include "string.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -146,13 +149,25 @@ r_obj *hash_table_get(HashTable *hash_table, const char *key) {
 }
 
 void free_object(r_obj *o) {
+
   if (o == NULL)
     return;
-  if (o->type == STRING) {
-    free(o->data);
-  } else if (o->type == LIST) {
-    // list_free
-    free(o->data);
+
+  switch (o->type) {
+  case STRING:
+    if (o->data)
+      free(o->data);
+    break;
+  case LIST:
+    if (o->data)
+      list_destroy((List *)o->data);
+    break;
+  case ZSET:
+    zset_destroy((ZSet *)o->data);
+    break;
+  case SET:
+    hash_table_destroy((Set *)o->data);
+    break;
   }
 
   free(o);
@@ -171,8 +186,9 @@ int hash_table_del(HashTable *hash_table, const char *key) {
         prev->next = entry->next;
       }
 
-      free(entry->key);
       free_object(entry->value);
+
+      free(entry->key);
       free(entry);
 
       hash_table->count--;
@@ -184,4 +200,35 @@ int hash_table_del(HashTable *hash_table, const char *key) {
   }
 
   return 0;
+}
+
+void hash_table_destroy(HashTable *hash_table) {
+  if (!hash_table)
+    return;
+
+  unsigned int i;
+  for (i = 0; i < hash_table->size; i++) {
+    Node *entry = hash_table->buckets[i];
+    while (entry) {
+      Node *next = entry->next;
+
+      if (entry->key)
+        free(entry->key);
+
+      if (entry->value) {
+        r_obj *o = (r_obj *)entry->value;
+        if (o->data)
+          free(o->data);
+        free(o);
+      }
+
+      free(entry);
+
+      entry = next;
+    }
+  }
+
+  free(hash_table->buckets);
+
+  free(hash_table);
 }

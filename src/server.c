@@ -55,8 +55,15 @@ void active_expire_cycle(HashTable *db, HashTable *expires) {
 
 int main() {
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (server_fd == 0) {
+  if (server_fd < 0) {
     perror("Socket failed");
+    exit(EXIT_FAILURE);
+  }
+
+  int opt = 1;
+  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+    perror("setsockopt(SO_REUSEADDR)");
+    close(server_fd);
     exit(EXIT_FAILURE);
   }
 
@@ -251,6 +258,25 @@ int main() {
 
                   free(output_str);
                 }
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
+              }
+            } else if (strcasecmp(arg_values[0], "DEL") == 0) {
+              if (arg_count >= 2) {
+                int deleted_count = 0;
+
+                for (int i = 1; i < arg_count; i++) {
+                  char *key = arg_values[i];
+                  r_obj *o = hash_table_get(db, key);
+                  printf("%s key is \r\n", key);
+                  hash_table_del(db, key);
+                  deleted_count++;
+                }
+
+                char resp[32];
+                sprintf(resp, ":%d\r\n", deleted_count);
+                write(current_fd, resp, strlen(resp));
+
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
