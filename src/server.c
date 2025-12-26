@@ -33,7 +33,7 @@ void set_nonblocking(int fd) {
   }
 }
 
-long long get_time_s() { return (long long)time(NULL); }
+long long get_time_ms() { return (long long)time(NULL) * 1000; }
 
 void active_expire_cycle(HashTable *db, HashTable *expires) {
   for (int i = 0; (size_t)i < expires->size; i++) {
@@ -42,7 +42,7 @@ void active_expire_cycle(HashTable *db, HashTable *expires) {
       Node *next = node->next;
 
       long long *kill_time = (long long *)node->value->data;
-      if (get_time_s() > *kill_time) {
+      if (get_time_ms() > *kill_time) {
         printf("Active expiry: Deleting '%s'\n", node->key);
         hash_table_del(db, node->key);
         hash_table_del(expires, node->key);
@@ -161,21 +161,147 @@ int main() {
           int arg_count = parse_resp_request(buffer, valread, arg_values, 10);
 
           if (arg_count > 0) {
-
-            printf("%d", arg_count);
             if (strcasecmp(arg_values[0], "SET") == 0) {
               if (arg_count >= 3) {
-                r_obj *o = create_string_object(arg_values[2]);
-                hash_table_set(db, arg_values[1], o);
+                int flags = OBJ_SET_NO_FLAGS;
+                long long expire_at = -1;
 
-                if (arg_count >= 5 && strcasecmp(arg_values[3], "EX") == 0) {
-                  printf("EXPIRARE MATII %lld", atoll(arg_values[4]));
-                  long long t = get_time_s() + atoll(arg_values[4]);
-                  printf("T PE MATA %lld", t);
-                  hash_table_set(expires, arg_values[1], create_int_object(t));
+                char *ifeq_val = NULL;
+                char *ifne_val = NULL;
+
+                int j;
+                for (j = 3; j < arg_count; j++) {
+                  char *option = arg_values[j];
+
+                  if (strcasecmp(option, "NX") == 0) {
+                    flags |= OBJ_SET_NX;
+                  } else if (strcasecmp(option, "XX") == 0) {
+                    flags |= OBJ_SET_XX;
+                  } else if (strcasecmp(option, "GET") == 0) {
+                    flags |= OBJ_SET_GET;
+                  } else if (strcasecmp(option, "KEEPTTL") == 0) {
+                    flags |= OBJ_SET_KEEPTTL;
+                  } else if (strcasecmp(option, "EX") == 0 &&
+                             j + 1 < arg_count) {
+                    long long value = atoll(arg_values[++j]);
+                    if (value <= 0) {
+                      write(current_fd, "-ERR invalid expire time\r\n", 26);
+                    }
+                    expire_at = get_time_ms() + (value * 1000);
+                  } else if (strcasecmp(option, "PX") == 0 &&
+                             j + 1 < arg_count) {
+                    long long value = atoll(arg_values[++j]);
+                    if (value <= 0) {
+                      write(current_fd, "-ERR invalid expire time\r\n", 26);
+                    }
+                    expire_at = get_time_ms() + value;
+                  } else if (strcasecmp(option, "EXAT") == 0 &&
+                             j + 1 < arg_count) {
+                    long long value = atoll(arg_values[++j]);
+                    if (value <= 0) {
+                      write(current_fd, "-ERR invalid expire time\r\n", 26);
+                    }
+                    expire_at = value * 1000;
+                  } else if (strcasecmp(option, "PXAT") == 0 &&
+                             j + 1 < arg_count) {
+                    long long value = atoll(arg_values[++j]);
+                    if (value <= 0) {
+                      write(current_fd, "-ERR invalid expire time\r\n", 26);
+                    }
+                    expire_at = value;
+                  } else if (strcasecmp(option, "IFEQ") == 0 &&
+                             j + 1 < arg_count) {
+                    flags |= OBJ_SET_IFEQ;
+                    ifeq_val = arg_values[++j];
+                  } else if (strcasecmp(option, "IFNE") == 0 &&
+                             j + 1 < arg_count) {
+                    flags |= OBJ_SET_IFNE;
+                    ifne_val = arg_values[++j];
+                  } else {
+                    write(current_fd, "-ERR syntax error\r\n", 19);
+                  }
                 }
 
-                write(current_fd, "+OK\r\n", 5);
+                if ((flags & OBJ_SET_NX) && (flags & OBJ_SET_XX)) {
+                  write(current_fd, "-ERR syntax error\r\n", 19);
+                }
+
+                if ((flags & OBJ_SET_IFEQ) && (flags & OBJ_SET_IFNE)) {
+                  write(current_fd, "-ERR syntax error\r\n", 19);
+                }
+
+                r_obj *o = hash_table_get(db, arg_values[1]);
+
+                if ((flags & OBJ_SET_NX) && o != NULL) {
+                  write(current_fd, "_\r\n", 3);
+                }
+
+                if ((flags & OBJ_SET_XX) && o == NULL) {
+                  write(current_fd, "_\r\n", 3);
+                }
+
+                if (flags & OBJ_SET_IFEQ) {
+                  if (o == NULL) {
+                    write(current_fd, "_\r\n", 3);
+                  }
+
+                  if (o->type != STRING) {
+                    write(current_fd, "_\r\n", 3);
+                  }
+
+                  if (strcmp((char *)o->data, ifeq_val) != 0) {
+                    write(current_fd, "_\r\n", 3);
+                  }
+                }
+
+                if (flags & OBJ_SET_IFNE) {
+                  if (o != NULL) {
+                    if (o->type == STRING &&
+                        strcmp((char *)o->data, ifne_val) == 0) {
+                      write(current_fd, "_\r\n", 3);
+                    }
+                  }
+                }
+
+                char resp_buf[256];
+                int resp_len = 0;
+
+                if (flags & OBJ_SET_GET) {
+                  if (o == NULL) {
+                    strcpy(resp_buf, "_\r\n");
+                  } else if (o->type != STRING) {
+                    write(current_fd,
+                          "-WRONGTYPE Operation against a key holding the "
+                          "wrong kind of value\r\n",
+                          68);
+                  } else {
+                    char *old = (char *)o->data;
+                    sprintf(resp_buf, "$%lu\r\n%s\r\n", strlen(old), old);
+                  }
+                } else {
+                  strcpy(resp_buf, "+OK\r\n");
+                }
+
+                resp_len = strlen(resp_buf);
+
+                if ((flags & OBJ_SET_KEEPTTL) && o != NULL && expire_at == -1) {
+                  r_obj *ttl = hash_table_get(expires, arg_values[1]);
+                  if (ttl != NULL) {
+                    expire_at = *(long long *)ttl->data;
+                  }
+                }
+
+                r_obj *new_obj = create_string_object(arg_values[2]);
+                hash_table_set(db, arg_values[1], new_obj);
+
+                if (expire_at != -1) {
+                  hash_table_set(expires, arg_values[1],
+                                 create_int_object(expire_at));
+                } else {
+                  hash_table_del(expires, arg_values[1]);
+                }
+
+                write(current_fd, resp_buf, resp_len);
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
@@ -184,7 +310,7 @@ int main() {
                 r_obj *exp_obj = hash_table_get(expires, arg_values[1]);
                 if (exp_obj) {
                   long long *kill_time = (long long *)exp_obj->data;
-                  if (get_time_s() > *kill_time) {
+                  if (get_time_ms() > *kill_time) {
                     hash_table_del(db, arg_values[1]);
                     hash_table_del(expires, arg_values[1]);
 
@@ -292,9 +418,10 @@ int main() {
                     write(current_fd, ":-1\r\n", 5);
                   } else if (ttl->data != NULL) {
                     char resp[32];
-                    long long seconds = *(long long *)ttl->data - get_time_s();
-                    sprintf(resp, ":%lld\r\n", seconds);
 
+                    long long seconds =
+                        (*(long long *)ttl->data - get_time_ms()) / 1000;
+                    sprintf(resp, ":%lld\r\n", seconds);
                     write(current_fd, resp, strlen(resp));
                   }
                 }
@@ -533,6 +660,31 @@ int main() {
                 write(current_fd, "-ERR args\r\n", 11);
               }
 
+            } else if (strcasecmp(arg_values[0], "ZSCORE") == 0) {
+              if (arg_count >= 3) {
+                r_obj *o = hash_table_get(db, arg_values[1]);
+                if (o == NULL) {
+                  write(current_fd, "$-1\r\n", 5);
+                } else if (o->type != ZSET) {
+                  char *err = "-WRONGTYPE Operation against a key holding the "
+                              "wrong kind of value\r\n";
+                  write(current_fd, err, strlen(err));
+                } else {
+                  ZSet *zs = (ZSet *)o->data;
+                  r_obj *score_o = hash_table_get(zs->dict, arg_values[2]);
+                  if (score_o == NULL) {
+                    write(current_fd, "$-1\r\n", 5);
+                  } else {
+                    double score = *(double *)score_o->data;
+
+                    char resp[128];
+                    sprintf(resp, ",%.17g\r\n", score);
+                    write(current_fd, resp, strlen(resp));
+                  }
+                }
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
+              }
             } else if (strcasecmp(arg_values[0], "SAVE") == 0) {
               rdb_save(db, expires, "dump.rdb");
               char *resp = "+OK\r\n";

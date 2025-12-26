@@ -2,6 +2,18 @@
 #define HASH_TABLE_H
 
 #include <stddef.h>
+
+// Bitmasks for SET command
+#define OBJ_SET_NO_FLAGS 0
+#define OBJ_SET_NX (1 << 0)
+#define OBJ_SET_XX (1 << 1)
+#define OBJ_SET_EX (1 << 2)
+#define OBJ_SET_PX (1 << 3)
+#define OBJ_SET_KEEPTTL (1 << 4)
+#define OBJ_SET_GET (1 << 5)
+#define OBJ_SET_IFEQ (1 << 6)
+#define OBJ_SET_IFNE (1 << 7)
+
 typedef enum {
   STRING = 0,
   LIST = 1,
