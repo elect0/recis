@@ -320,72 +320,21 @@ int main() {
                 }
                 r_obj *o = hash_table_get(db, arg_values[1]);
 
-                if (o == NULL) {
-                  write(current_fd, "$-1\r\n", 5);
-                } else if (o->type == STRING) {
-                  char *val = (char *)o->data;
-                  int len = strlen(val);
-
-                  char header[32];
-                  sprintf(header, "$%d\r\n", len);
-
-                  write(current_fd, header, strlen(header));
-                  write(current_fd, val, len);
-                  write(current_fd, "\r\n", 2);
-                } else if (o->type == LIST) {
-                  List *list = (List *)o->data;
-
-                  size_t total_len = 2;
-
-                  ListNode *node = list->head;
-                  while (node != NULL) {
-                    char *val = (char *)node->value;
-                    total_len += strlen(val);
-
-                    if (node->next) {
-                      total_len += 2; // add 2 bytes for comma (", ") separator
-                    }
-                    node = node->next;
-                  }
-
-                  char *output_str =
-                      malloc(total_len + 1); //  + 1 for null termiantor
-                  if (output_str == NULL) {
-                    perror("malloc failed in GET list");
-                    return 1;
-                  }
-
-                  char *ptr = output_str;
-                  *ptr++ = '[';
-
-                  node = list->head;
-                  while (node != NULL) {
-                    char *val = (char *)node->value;
-                    size_t vlen = strlen(val);
-
-                    memcpy(ptr, val, vlen);
-                    ptr += vlen;
-
-                    if (node->next) {
-                      *ptr++ = ',';
-                      *ptr++ = ' ';
-                    }
-
-                    node = node->next;
-                  }
-
-                  *ptr++ = ']';
-                  *ptr++ = '\0';
-
-                  char header[32];
-                  sprintf(header, "$%lu\r\n", total_len);
-
-                  write(current_fd, header, strlen(header));
-                  write(current_fd, output_str, total_len);
-                  write(current_fd, "\r\n", 2);
-
-                  free(output_str);
+                if (!o) {
+                  write(current_fd, "_\r\n", 3);
                 }
+                if (o->type != STRING) {
+                  write(current_fd,
+                        "-WRONGTYPE Operation against a key holding the "
+                        "wrong kind of value\r\n",
+                        68);
+                } else {
+                  char *value = (char *)o->data;
+                  char resp[256];
+                  sprintf(resp, "$%lu\r\n%s\r\n", strlen(value), value);
+                  write(current_fd, resp, strlen(resp));
+                }
+
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
@@ -396,7 +345,6 @@ int main() {
                 for (int i = 1; i < arg_count; i++) {
                   char *key = arg_values[i];
                   r_obj *o = hash_table_get(db, key);
-                  printf("%s key is \r\n", key);
                   hash_table_del(db, key);
                   deleted_count++;
                 }
@@ -431,20 +379,25 @@ int main() {
               if (arg_count >= 3) {
                 r_obj *o = hash_table_get(db, arg_values[1]);
 
+                if (o != NULL && o->type != LIST) {
+                  char *msg = "-WRONGTYPE Operation against a key holding "
+                              "the wrong kind of value\r\n";
+                  write(current_fd, msg, strlen(msg));
+                }
+
                 if (!o) {
                   o = create_list_object();
                   hash_table_set(db, arg_values[1], o);
                 }
 
-                if (o->type != LIST) {
-                  char *msg = "-WRONGTYPE Operation against a key holding "
-                              "the wrong kind of value\r\n";
-                  write(current_fd, msg, strlen(msg));
-                } else {
-                  list_ins_node_head((List *)o->data, strdup(arg_values[2]));
-
-                  write(current_fd, "+OK\r\n", 5);
+                int j;
+                List *list = (List *)o->data;
+                for (j = 2; j < arg_count; j++) {
+                  list_ins_node_head(list, strdup(arg_values[j]));
                 }
+                char resp[64];
+                snprintf(resp, sizeof(resp), ":%lu\r\n", list->size);
+                write(current_fd, resp, strlen(resp));
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
@@ -452,20 +405,27 @@ int main() {
               if (arg_count >= 3) {
                 r_obj *o = hash_table_get(db, arg_values[1]);
 
+                if (o != NULL && o->type != LIST) {
+                  char *msg = "-WRONGTYPE Operation against a key holding "
+                              "the wrong kind of value\r\n";
+                  write(current_fd, msg, strlen(msg));
+                }
+
                 if (!o) {
                   o = create_list_object();
                   hash_table_set(db, arg_values[1], o);
                 }
 
-                if (o->type != LIST) {
-                  char *msg = "-WRONGTYPE Operation against a key holding "
-                              "the wrong kind of value\r\n";
-                  write(current_fd, msg, strlen(msg));
-                } else {
-                  list_ins_node_tail((List *)o->data, strdup(arg_values[2]));
-
-                  write(current_fd, "+OK\r\n", 5);
+                int j;
+                List *list = (List *)o->data;
+                for (j = 2; j < arg_count; j++) {
+                  list_ins_node_tail(list, strdup(arg_values[j]));
                 }
+
+                char resp[64];
+                snprintf(resp, sizeof(resp), ":%lu\r\n", list->size);
+                write(current_fd, resp, strlen(resp));
+
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
@@ -474,52 +434,97 @@ int main() {
                 r_obj *o = hash_table_get(db, arg_values[1]);
 
                 if (!o) {
-                  write(current_fd, "$-1\r\n", 5);
+                  write(current_fd, "_\r\n", 3);
                 } else if (o->type != LIST) {
                   char *msg = "-WRONGTYPE Operation against a key holding "
                               "the wrong kind of value\r\n";
                   write(current_fd, msg, strlen(msg));
                 } else {
                   List *list = (List *)o->data;
-                  char *val = (char *)list_pop_tail(list);
 
-                  if (val) {
-                    int len = strlen(val);
+                  if (arg_count == 3) {
+                    int count = atoi(arg_values[2]);
 
-                    char header[32];
-                    sprintf(header, "$%d\r\n", len);
+                    if (count > list->size) {
+                      count = list->size;
+                    }
 
+                    char header[64];
+                    snprintf(header, sizeof(header), "*%d\r\n", count);
                     write(current_fd, header, strlen(header));
-                    write(current_fd, val, strlen(val));
-                    write(current_fd, "\r\n", 2);
 
-                    free(val);
+                    for (int i = 0; i < count; i++) {
+                      char *value = (char *)list_pop_tail(list);
+                      char bulk_header[64];
+
+                      snprintf(bulk_header, sizeof(bulk_header), "$%lu\r\n",
+                               strlen(value));
+                      write(current_fd, bulk_header, strlen(bulk_header));
+                      write(current_fd, value, strlen(value));
+                      write(current_fd, "\r\n", 2);
+
+                      free(value);
+                    }
                   } else {
-                    write(current_fd, "$-1\r\n", 5);
+                    char *value = (char *)list_pop_tail(list);
+
+                    if (value) {
+                      int len = strlen(value);
+
+                      char bulk_header[64];
+                      snprintf(bulk_header, sizeof(bulk_header), "$%d\r\n",
+                               len);
+
+                      write(current_fd, bulk_header, strlen(bulk_header));
+                      write(current_fd, value, strlen(value));
+                      write(current_fd, "\r\n", 2);
+
+                      free(value);
+                    } else {
+                      write(current_fd, "$-1\r\n", 5);
+                    }
+                  }
+                  if (list->size == 0) {
+                    hash_table_del(db, arg_values[1]);
                   }
                 }
+              } else {
+                write(current_fd, "-ERR args\r\n", 11);
               }
             } else if (strcasecmp(arg_values[0], "SADD") == 0) {
               if (arg_count >= 3) {
                 r_obj *o = hash_table_get(db, arg_values[1]);
+
+                if (o != NULL && o->type != SET) {
+                  char *msg = "-WRONGTYPE Operation against a key holding "
+                              "the wrong kind of value\r\n";
+                  write(current_fd, msg, strlen(msg));
+                  continue;
+                }
 
                 if (o == NULL) {
                   o = create_set_object();
                   hash_table_set(db, arg_values[1], o);
                 }
 
-                if (o->type != SET) {
-                  char *msg = "-WRONGTYPE Operation against a key holding "
-                              "the wrong kind of value\r\n";
-                  write(current_fd, msg, strlen(msg));
-                } else {
-                  int added =
-                      set_add((HashTable *)o->data, strdup(arg_values[2]));
+                int j;
+                int count = 0;
 
-                  char resp[32];
-                  sprintf(resp, ":%d\r\n", added);
-                  write(current_fd, resp, strlen(resp));
+                HashTable *set = (HashTable *)o->data;
+
+                for (j = 2; j < arg_count; j++) {
+                  char *member = strdup(arg_values[j]);
+                  if (set_add(set, member) == 1) {
+                    count++;
+                  } else {
+                    free(member);
+                  }
                 }
+
+                char resp[64];
+                snprintf(resp, sizeof(resp), ":%d\r\n", count);
+                write(current_fd, resp, strlen(resp));
+
               } else {
                 write(current_fd, "-ERR args\r\n", 11);
               }
@@ -527,17 +532,20 @@ int main() {
               if (arg_count >= 3) {
                 r_obj *o = hash_table_get(db, arg_values[1]);
 
-                if (!o) {
-                  write(current_fd, ":0\r\n", 4);
-                } else if (o->type != SET) {
+                if (o != NULL && o->type != SET) {
                   char *err = "-WRONGTYPE Operation against a key holding the "
                               "wrong kind of value\r\n";
                   write(current_fd, err, strlen(err));
+                  continue;
+                }
+
+                if (!o) {
+                  write(current_fd, ":0\r\n", 4);
                 } else {
                   int is_member =
                       set_is_member((HashTable *)o->data, arg_values[2]);
-                  char resp[32];
-                  sprintf(resp, ":%d\r\n", is_member);
+                  char resp[64];
+                  snprintf(resp, sizeof(resp), ":%d\r\n", is_member);
                   write(current_fd, resp, strlen(resp));
                 }
               } else {
@@ -545,22 +553,150 @@ int main() {
               }
             } else if (strcasecmp(arg_values[0], "ZADD") == 0) {
               if (arg_count >= 4) {
+
+                int flags = ZADD_SET_NO_FLAGS;
+                int flags_count = 0;
+
+                int j;
+                for (j = 2; j < arg_count; j++) {
+                  char *option = arg_values[j];
+
+                  if (strcasecmp(option, "NX") == 0) {
+                    flags |= ZADD_SET_NX;
+                    flags_count++;
+                  } else if (strcasecmp(option, "XX") == 0) {
+                    flags |= ZADD_SET_XX;
+                    flags_count++;
+                  } else if (strcasecmp(option, "GT") == 0) {
+                    flags |= ZADD_SET_GT;
+                    flags_count++;
+                  } else if (strcasecmp(option, "LT") == 0) {
+                    flags |= ZADD_SET_LT;
+                    flags_count++;
+                  } else if (strcasecmp(option, "CH") == 0) {
+                    flags |= ZADD_SET_CH;
+                    flags_count++;
+                  } else if (strcasecmp(option, "INCR") == 0) {
+                    flags |= ZADD_SET_INCR;
+                    flags_count++;
+                  } else
+                    break;
+                }
+
+                int nx = flags & ZADD_SET_NX;
+                int xx = flags & ZADD_SET_XX;
+                int gt = flags & ZADD_SET_GT;
+                int lt = flags & ZADD_SET_LT;
+
+                if ((nx && xx) || (gt && lt) || (gt && nx) || (lt && nx)) {
+                  write(current_fd, "-ERR syntax error\r\n", 19);
+                  continue;
+                }
+
+                int remaining_args = arg_count - j;
+                if (remaining_args == 0 || remaining_args % 2 != 0) {
+                  write(current_fd, "-ERR syntax error\r\n", 19);
+                  continue;
+                }
+
+                if ((flags & ZADD_SET_INCR) && remaining_args != 2) {
+                  char *err = "-ERR INCR option supports a single "
+                              "increment-element pair\r\n";
+                  write(current_fd, err, strlen(err));
+                  continue;
+                }
+
                 r_obj *o = hash_table_get(db, arg_values[1]);
 
-                if (!o) {
-                  o = create_zset_object();
-                  hash_table_set(db, arg_values[1], o);
-                } else if (o->type != ZSET) {
+                if (o != NULL && o->type != ZSET) {
                   char *err = "-WRONGTYPE Operation against a key holding the "
                               "wrong kind of value\r\n";
                   write(current_fd, err, strlen(err));
+                  continue;
                 }
-                int added = zset_add((ZSet *)o->data, arg_values[3],
-                                     atof(arg_values[2]));
-                if (added) {
-                  write(current_fd, ":1\r\n", 4);
-                } else {
-                  write(current_fd, ":0\r\n", 4);
+
+                if (!o) {
+                  if (xx) {
+                    if (flags & ZADD_SET_INCR)
+                      write(current_fd, "$-1\r\n", 5);
+                    else
+                      write(current_fd, ":0\r\n", 4);
+                    continue;
+                  }
+                  o = create_zset_object();
+                  hash_table_set(db, arg_values[1], o);
+                }
+
+                ZSet *zs = (ZSet *)o->data;
+
+                int added = 0;
+                int changed = 0;
+                int processed = 0;
+
+                for (int i = j; i < arg_count; i++) {
+                  double score = atof(arg_values[i]);
+                  char *member = arg_values[++i];
+
+                  if (flags & ZADD_SET_INCR) {
+                    r_obj *score_o = hash_table_get(zs->dict, member);
+                    double current_score = 0.0;
+
+                    if (score_o != NULL) {
+                      current_score = *(double *)o->data;
+                    } else {
+                      if (xx) {
+                        write(current_fd, "_\r\n", 3);
+                        continue;
+                      }
+                    }
+
+                    double new_score = current_score + score;
+
+                    zset_add(zs, member, new_score);
+                    char num_str[64];
+                    int len =
+                        snprintf(num_str, sizeof(num_str), "%.17g", new_score);
+
+                    char bulk_header[64];
+                    snprintf(bulk_header, sizeof(bulk_header), "$%d\r\n", len);
+
+                    write(current_fd, bulk_header, strlen(bulk_header));
+                    write(current_fd, num_str, strlen(num_str));
+                    write(current_fd, "\r\n", 2);
+                    processed++;
+                    continue;
+                  }
+
+                  r_obj *member_o = hash_table_get(zs->dict, member);
+
+                  if (nx && member_o != NULL)
+                    continue;
+                  if (xx && member_o == NULL)
+                    continue;
+
+                  if (member_o != NULL) {
+                    double current_score = *(double *)member_o->data;
+                    if (gt && score <= current_score)
+                      continue;
+                    if (lt && score >= current_score)
+                      continue;
+
+                    zset_add(zs, member, score);
+                    changed++;
+                  } else {
+                    zset_add(zs, member, score);
+                    added++;
+                  }
+                }
+                if (!(flags & ZADD_SET_INCR)) {
+                  int ret_val = added;
+                  if (flags & ZADD_SET_CH) {
+                    ret_val = added + changed;
+                  }
+
+                  char resp[64];
+                  snprintf(resp, sizeof(resp), ":%d\r\n", ret_val);
+                  write(current_fd, resp, strlen(resp));
                 }
               } else {
                 write(current_fd, "-ERR args\r\n", 11);

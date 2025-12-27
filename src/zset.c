@@ -138,11 +138,69 @@ void zset_destroy(ZSet *zs) {
   free(zs);
 }
 
-int zset_add(ZSet *zs, char *element, double score) {
+int zsl_remove(ZSkipList *zsl, double score, char *element) {
+  ZSkipListNode *x = zsl->head;
+  ZSkipListNode *update[ZSKIPLIST_MAX_LEVEL];
 
-  // TODO: implement update
-  if (hash_table_get(zs->dict, element) != NULL)
-    return 0;
+  int i;
+  for (i = zsl->level - 1; i >= 0; i--) {
+    while (x->level[i].forward &&
+           (x->level[i].forward->score < score ||
+            (x->level[i].forward->score == score &&
+             strcmp(x->level[i].forward->element, element) < 0))) {
+      x = x->level[i].forward;
+    }
+    update[i] = x;
+  }
+
+  ZSkipListNode *candidate = update[0]->level[0].forward;
+  if (candidate != NULL && candidate->score == score &&
+      strcasecmp(candidate->element, element) == 0) {
+    for (i = zsl->level - 1; i >= 0; i--) {
+      if (update[i]->level[i].forward == candidate) {
+        update[i]->level[i].span += candidate->level[i].span - 1;
+        update[i]->level[i].forward = candidate->level[i].forward;
+      } else {
+        update[i]->level[i].span -= 1;
+      }
+    }
+
+    if (candidate->level[0].forward) {
+      candidate->level[0].forward->backward = candidate->backward;
+    } else {
+      zsl->tail = candidate->backward;
+    }
+
+    while (zsl->level > 1 && zsl->head->level[zsl->level - 1].forward == NULL) {
+      zsl->level--;
+    }
+
+    zsl->length--;
+
+    free(candidate->element);
+    free(candidate);
+
+    return 1;
+  }
+
+  return 0;
+}
+
+int zset_add(ZSet *zs, char *element, double score) {
+  r_obj *score_o;
+  if ((score_o = hash_table_get(zs->dict, element)) != NULL) {
+    double current_score = *(double *)score_o->data;
+    if (current_score == score)
+      return 0;
+
+    if (zsl_remove(zs->zsl, current_score, element) == 0)
+      return 0;
+
+    zsl_insert(zs->zsl, score, strdup(element));
+    hash_table_set(zs->dict, element, create_double_object(score));
+
+    return 1;
+  }
 
   char *element_copy = strdup(element);
 
@@ -163,24 +221,20 @@ r_obj *create_zset_object() {
   return o;
 }
 
-ZSkipListNode *zsl_get_node_at_rank(ZSkipList *zsl, int rank) {
-  ZSkipListNode *x = zsl->head;
-  int traversed = 0;
-
-  while (x->level[0].forward && traversed < rank) {
-    x = x->level[0].forward;
-    traversed++;
-  }
-
-  return x->level[0].forward;
-}
-
 ZSkipListNode *zsl_get_element_by_rank(ZSkipList *zsl, int rank) {
   ZSkipListNode *x = zsl->head->level[0].forward;
+  unsigned long traversed = 0;
   int i = 0;
-  while (x && i < rank) {
-    x = x->level[0].forward;
-    i++;
+
+  for (i = zsl->level - 1; i >= 0; i--) {
+    while (x->level[i].forward && (traversed + x->level[i].span) <= rank) {
+      traversed += x->level[i].span;
+      x = x->level[i].forward;
+    }
+
+    if (traversed == rank) {
+      return x;
+    }
   }
 
   return x;
@@ -191,7 +245,7 @@ unsigned long zsl_get_rank(ZSkipList *zsl, double score, char *element) {
   unsigned long rank = 0;
   int i;
 
-  for (i = zsl->level; i >= 0; i--) {
+  for (i = zsl->level - 1; i >= 0; i--) {
     while (x->level[i].forward &&
            (x->level[i].forward->score < score ||
             (x->level[i].forward->score == score &&
