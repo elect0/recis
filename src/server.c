@@ -99,11 +99,13 @@ int main() {
     return 1;
   }
 
+  Client *server_client = create_client(server_fd);
   printf("epoll instance created: %d\n", epfd);
 
   struct epoll_event ev;
-  ev.events = EPOLLIN;
-  ev.data.fd = server_fd;
+  ev.events = EPOLLIN | EPOLLET;
+  ev.data.ptr = server_client;
+  /* ev.data.fd = server_fd; */
 
   if (epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
     perror("epoll_ctl: server_socket");
@@ -123,9 +125,12 @@ int main() {
     active_expire_cycle(db, expires);
 
     for (int n = 0; n < nfds; ++n) {
-      int current_fd = events[n].data.fd;
+      /* int current_fd = events[n].data.fd; */
 
-      if (current_fd == server_fd) {
+      Client *c = (Client *)events[n].data.ptr;
+      int current_fd = c->fd;
+
+      if (c == server_client) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
 
@@ -139,9 +144,12 @@ int main() {
 
         set_nonblocking(client_fd);
 
+        Client *new_client = create_client(client_fd);
+
         struct epoll_event ev;
         ev.events = EPOLLIN;
-        ev.data.fd = client_fd;
+        ev.data.ptr = new_client;
+
         if (epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
           perror("epoll_ctl: client");
           close(client_fd);
@@ -150,15 +158,24 @@ int main() {
         printf("New client connected from: FD %d\n", client_fd);
       } else {
 
-        char buffer[BUFFER_SIZE] = {0};
-        ssize_t valread = read(current_fd, buffer, BUFFER_SIZE - 1);
+        if (read_from_client(c) != 0) {
+          close(current_fd);
+          continue;
+        }
 
-        if (valread > 0) {
-          buffer[valread] = '\0';
+        int status = parse_resp_request(c);
 
-          char *arg_values[10] = {0};
+        if (status == 1) {
+          // buffer[valread] = '\0';
+          //
+          // char *arg_values[10] = {0};
+          //
+          // int arg_count = parse_resp_request(buffer, valread, arg_values,
+          // 10);
 
-          int arg_count = parse_resp_request(buffer, valread, arg_values, 10);
+          char **arg_values = c->arg_values;
+
+          int arg_count = c->arg_count;
 
           if (arg_count > 0) {
             if (strcasecmp(arg_values[0], "SET") == 0) {
@@ -834,10 +851,7 @@ int main() {
               write(current_fd, err_msg, strlen(err_msg));
             }
             printf("Received command: %s\n", arg_values[0]);
-
-            for (int i = 0; i < arg_count; i++) {
-              free(arg_values[i]);
-            }
+            reset_client_args(c);
           } else {
             char *err = "-ERR protocol error or incomplete packet\r\n";
             write(current_fd, err, strlen(err));
