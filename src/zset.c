@@ -240,6 +240,43 @@ ZSkipListNode *zsl_get_element_by_rank(ZSkipList *zsl, int rank) {
   return x;
 }
 
+ZSkipListNode *zsl_first_in_range(ZSkipList *zsl, double min) {
+  ZSkipListNode *x = zsl->head;
+  int i;
+  for (i = zsl->level - 1; i >= 0; i--) {
+    while (x->level[i].forward && x->level[i].forward->score < min) {
+      x = x->level[i].forward;
+    }
+  }
+
+  x = x->level[0].forward;
+
+  if (x && x->score >= min)
+    return x;
+  return NULL;
+}
+
+ZSkipListNode *zsl_first_in_lex_range(ZSkipList *zsl, char *min,
+                                      int inclusive) {
+  ZSkipListNode *x = zsl->head;
+  int i;
+  for (i = zsl->level - 1; i >= 0; i--) {
+    while (x->level[i].forward) {
+      char *next_val = x->level[i].forward->element;
+      int cmp = strcmp(next_val, min);
+
+      if (inclusive ? (cmp < 0) : (cmp <= 0)) {
+        x = x->level[i].forward;
+      } else {
+        break;
+      }
+    }
+  }
+
+  x = x->level[0].forward;
+  return x;
+}
+
 unsigned long zsl_get_rank(ZSkipList *zsl, double score, char *element) {
   ZSkipListNode *x = zsl->head;
   unsigned long rank = 0;

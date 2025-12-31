@@ -109,8 +109,6 @@ void list_destroy(List *list) {
     void *value = list_pop_tail(list);
 
     if (value) {
-
-      printf("Sterg pointerul: %p\n", value); // Ve
       free(value);
     }
   }

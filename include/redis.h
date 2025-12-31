@@ -22,6 +22,7 @@ typedef enum {
   INT = 4,
   DOUBLE = 5,
   ZSET = 6,
+  COMMAND = 7,
 } obj_type;
 
 typedef struct RObj {

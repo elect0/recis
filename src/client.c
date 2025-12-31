@@ -20,6 +20,8 @@ Client *create_client(int fd) {
   client->arg_values = NULL;
   client->arg_values_cap = 0;
 
+  client->output_buffer = create_output_buffer(fd);
+
   return client;
 }
 

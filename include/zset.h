@@ -12,6 +12,14 @@
 #define ZADD_SET_CH 1 << 4
 #define ZADD_SET_INCR 1 << 5
 
+// Bitmasks for ZRANGE command
+#define ZRANGE_SET_NO_FLAGS 0
+#define ZRANGE_SET_BYSCORE 1 << 0
+#define ZRANGE_SET_BYLEX 1 << 1
+#define ZRANGE_SET_REV 1 << 2
+#define ZRANGE_SET_LIMIT 1 << 3
+#define ZRANGE_SET_WITHSCORE 1 << 4
+
 #define ZSKIPLIST_MAX_LEVEL 32
 #define ZSKIPLIST_P 0.25
 
@@ -49,6 +57,8 @@ void zset_range(ZSet *zs, int min_index, int max_index);
 void zset_destroy(ZSet *zs);
 
 ZSkipListNode *zsl_get_element_by_rank(ZSkipList *zsl, int rank);
+ZSkipListNode *zsl_first_in_range(ZSkipList *zsl, double min);
+ZSkipListNode *zsl_first_in_lex_range(ZSkipList *zsl, char *min, int inclusive);
 unsigned long zsl_get_rank(ZSkipList *zsl, double score, char *element);
 
 #endif // !ZSET_H
