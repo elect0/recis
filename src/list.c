@@ -100,6 +100,26 @@ void *list_pop_tail(List *list) {
   return value;
 }
 
+void *list_pop_head(List *list) {
+  if (list_size(list) == 0)
+    return NULL;
+  ListNode *node = list->head;
+  void *value = node->value;
+
+  if (list->head == list->tail) {
+    list->head = NULL;
+    list->tail = NULL;
+  } else {
+    list->head = node->next;
+    list->head->prev = NULL;
+  }
+
+  free(node);
+  list->size--;
+
+  return value;
+}
+
 void list_destroy(List *list) {
 
   if (list == NULL)

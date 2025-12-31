@@ -22,6 +22,7 @@ List *list_create(void);
 int list_ins_node_head(List *list, const void *value);
 int list_ins_node_tail(List *list, const void *value);
 void *list_pop_tail(List *list);
+void *list_pop_head(List *list);
 void list_destroy(List *list);
 
 #define list_size(list) ((list)->size)

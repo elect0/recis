@@ -33,6 +33,12 @@ void rpush_command(Client *client, HashTable *db, HashTable *expires,
                    OutputBuffer *ob);
 void rpop_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob);
+void lpop_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob);
+void llen_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob);
+void lindex_command(Client *client, HashTable *db, HashTable *expires,
+                    OutputBuffer *ob);
 void sadd_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob);
 void sismember_command(Client *client, HashTable *db, HashTable *expires,

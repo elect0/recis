@@ -10,21 +10,16 @@
 #include <time.h>
 #include <unistd.h>
 
-Command CommandTable[] = {{"SET", set_command, -3},
-                          {"GET", get_command, 2},
-                          {"DEL", del_command, -2},
-                          {"TTL", ttl_command, 2},
-                          {"LPUSH", lpush_command, -3},
-                          {"RPUSH", rpush_command, -3},
-                          {"RPOP", rpop_command, -2},
-                          {"SADD", sadd_command, -3},
-                          {"SISMEMBER", sismember_command, 3},
-                          {"ZADD", zadd_command, -4},
-                          {"ZRANGE", zrange_command, -4},
-                          {"ZSCORE", zscore_command, 3},
-                          {"ZRANK", zrank_command, 3},
-                          {"SAVE", save_command, 1},
-                          {NULL, NULL, 0}};
+Command CommandTable[] = {
+    {"SET", set_command, -3},      {"GET", get_command, 2},
+    {"DEL", del_command, -2},      {"TTL", ttl_command, 2},
+    {"LPUSH", lpush_command, -3},  {"RPUSH", rpush_command, -3},
+    {"RPOP", rpop_command, -2},    {"LPOP", lpop_command, -2},
+    {"LLEN", llen_command, 2},     {"LINDEX", lindex_command, 3},
+    {"SADD", sadd_command, -3},    {"SISMEMBER", sismember_command, 3},
+    {"ZADD", zadd_command, -4},    {"ZRANGE", zrange_command, -4},
+    {"ZSCORE", zscore_command, 3}, {"ZRANK", zrank_command, 3},
+    {"SAVE", save_command, 1},     {NULL, NULL, 0}};
 
 r_obj *create_command_object(Command *cmd) {
   r_obj *o;
@@ -329,7 +324,8 @@ void lpush_command(Client *client, HashTable *db, HashTable *expires,
   }
 
   r_obj *o = hash_table_get(db, arg_values[1]);
-  if (o != NULL && o->type == LIST) {
+
+  if (o != NULL && o->type != LIST) {
     char *msg = "-WRONGTYPE Operation against a key holding "
                 "the wrong kind of value\r\n";
     append_to_output_buffer(ob, msg, strlen(msg));
@@ -351,6 +347,87 @@ void lpush_command(Client *client, HashTable *db, HashTable *expires,
   char resp[64];
   int resp_len = snprintf(resp, sizeof(resp), ":%lu\r\n", list->size);
   append_to_output_buffer(ob, resp, resp_len);
+  return;
+}
+
+void llen_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob) {
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 2) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, ":0\r\n", 4);
+    return;
+  }
+  if (o->type != LIST) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  List *list = (List *)o->data;
+  char resp[64];
+  int resp_len = snprintf(resp, sizeof(resp), ":%lu\r\n", list->size);
+  append_to_output_buffer(ob, resp, resp_len);
+  return;
+}
+
+void lindex_command(Client *client, HashTable *db, HashTable *expires,
+                    OutputBuffer *ob) {
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 3) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, "_\r\n", 3);
+    return;
+  }
+
+  if (o->type != LIST) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  List *list = (List *)o->data;
+  int index = atoi(arg_values[2]);
+
+  if (index < 0 || index >= list->size) {
+    append_to_output_buffer(ob, "_\r\n", 3);
+    return;
+  }
+
+  ListNode *member = list->head;
+  printf("list->head %s", (char *)member->value);
+
+  while (index > 0) {
+    member = member->next;
+    index--;
+  }
+
+  char *value = (char *)member->value;
+  size_t val_len = strlen(value);
+
+  char header[64];
+  int head_len = snprintf(header, sizeof(header), "$%zu\r\n", val_len);
+  append_to_output_buffer(ob, header, head_len);
+  append_to_output_buffer(ob, value, val_len);
+  append_to_output_buffer(ob, "\r\n", 2);
   return;
 }
 
@@ -440,6 +517,78 @@ void rpop_command(Client *client, HashTable *db, HashTable *expires,
     }
   } else {
     char *value = (char *)list_pop_tail(list);
+
+    if (value) {
+      unsigned long value_len = strlen(value);
+
+      char bulk_header[64];
+      int bh_len =
+          snprintf(bulk_header, sizeof(bulk_header), "$%lu\r\n", value_len);
+
+      append_to_output_buffer(ob, bulk_header, bh_len);
+      append_to_output_buffer(ob, value, value_len);
+      append_to_output_buffer(ob, "\r\n", 2);
+    } else {
+      append_to_output_buffer(ob, "$-1\r\n", 5);
+      return;
+    }
+  }
+  if (list->size == 0) {
+    hash_table_del(db, arg_values[1]);
+  }
+
+  return;
+}
+
+void lpop_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob) {
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count < 2) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, "_\r\n", 3);
+    return;
+  } else if (o->type != LIST) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  List *list = (List *)o->data;
+
+  if (arg_count == 3) {
+    int count = atoi(arg_values[2]);
+
+    if (count > list->size) {
+      count = list->size;
+    }
+
+    char header[64];
+    int header_len = snprintf(header, sizeof(header), "*%d\r\n", count);
+    append_to_output_buffer(ob, header, header_len);
+
+    for (int i = 0; i < count; i++) {
+      char *value = (char *)list_pop_head(list);
+      unsigned long value_len = strlen(value);
+      char bulk_header[64];
+      int bh_len =
+          snprintf(bulk_header, sizeof(bulk_header), "$%lu\r\n", value_len);
+      append_to_output_buffer(ob, bulk_header, bh_len);
+      append_to_output_buffer(ob, value, value_len);
+      append_to_output_buffer(ob, "\r\n", 2);
+
+      free(value);
+    }
+  } else {
+    char *value = (char *)list_pop_head(list);
 
     if (value) {
       unsigned long value_len = strlen(value);
