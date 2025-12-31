@@ -45,9 +45,6 @@ void append_to_output_buffer(OutputBuffer *ob, const char *data, size_t len) {
     flush_buffer(ob);
   }
 
-  printf("Appending to buffer: [%.*s]\n", (int)len,
-         data); // See exactly what is going in
-
   memcpy(ob->data + ob->length, data, len);
   ob->length += len;
 }

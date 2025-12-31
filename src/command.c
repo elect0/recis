@@ -4,6 +4,7 @@
 #include "../include/set.h"
 #include "../include/zset.h"
 #include <ctype.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -201,8 +202,6 @@ void set_command(Client *client, HashTable *db, HashTable *expires,
   r_obj *new_obj = create_string_object(arg_values[2]);
   hash_table_set(db, arg_values[1], new_obj);
 
- 
-
   if (expire_at != -1) {
     hash_table_set(expires, arg_values[1], create_int_object(expire_at));
   } else {
@@ -229,7 +228,6 @@ void get_command(Client *client, HashTable *db, HashTable *expires,
 
   r_obj *exp_obj = hash_table_get(expires, arg_values[1]);
 
-
   if (exp_obj != NULL) {
     long long *kill_time = (long long *)exp_obj->data;
     if (get_time_ms() > *kill_time) {
@@ -247,7 +245,6 @@ void get_command(Client *client, HashTable *db, HashTable *expires,
     append_to_output_buffer(ob, "_\r\n", 3);
     return;
   }
-
 
   if (o->type != STRING) {
     append_to_output_buffer(ob,
@@ -704,7 +701,6 @@ void zadd_command(Client *client, HashTable *db, HashTable *expires,
 
 void zrange_command(Client *client, HashTable *db, HashTable *expires,
                     OutputBuffer *ob) {
-
   char **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -714,30 +710,31 @@ void zrange_command(Client *client, HashTable *db, HashTable *expires,
   }
 
   int flags = ZRANGE_SET_NO_FLAGS;
-  int limit_offset, limit_count;
+  int limit_offset = 0;
+  int limit_count = -1; // -1 implies infinite
+  int with_scores = 0;
+  int reverse = 0;
 
   int j;
   for (j = 4; j < arg_count; j++) {
-    char *option = arg_values[j];
-
-    if (strcasecmp(option, "BYSCORE") == 0) {
+    if (!strcasecmp(arg_values[j], "BYSCORE"))
       flags |= ZRANGE_SET_BYSCORE;
-    } else if (strcasecmp(option, "BYLEX") == 0) {
-      if (is_valid_alpha_string(arg_values[2]) == 0 ||
-          is_valid_alpha_string(arg_values[3]) == 0) {
-        char *msg = "-ERR min or max not valid string range item\r\n";
-        append_to_output_buffer(ob, msg, strlen(msg));
+    else if (!strcasecmp(arg_values[j], "BYLEX"))
+      flags |= ZRANGE_SET_BYLEX;
+    else if (!strcasecmp(arg_values[j], "REV")) {
+      flags |= ZRANGE_SET_REV;
+      reverse = 1;
+    } else if (!strcasecmp(arg_values[j], "WITHSCORES"))
+      with_scores = 1;
+    else if (!strcasecmp(arg_values[j], "LIMIT")) {
+      if ((j + 2) >= arg_count) {
+        append_to_output_buffer(ob, "-ERR syntax error\r\n", 19);
         return;
       }
-      flags |= ZRANGE_SET_BYLEX;
-    } else if (strcasecmp(option, "REV") == 0) {
-      flags |= ZRANGE_SET_REV;
-    } else if (strcasecmp(option, "LIMIT") == 0) {
       flags |= ZRANGE_SET_LIMIT;
-      limit_offset = atoi(arg_values[++j]);
-      limit_count = atoi(arg_values[j += 2]);
-    } else if (strcasecmp(option, "WITHSCORES")) {
-      flags |= ZRANGE_SET_WITHSCORE;
+      limit_offset = atoi(arg_values[j + 1]);
+      limit_count = atoi(arg_values[j + 2]);
+      j += 2;
     } else {
       append_to_output_buffer(ob, "-ERR syntax error\r\n", 19);
       return;
@@ -748,231 +745,146 @@ void zrange_command(Client *client, HashTable *db, HashTable *expires,
     append_to_output_buffer(ob, "-ERR syntax error\r\n", 19);
     return;
   }
-
-  if ((flags & ZRANGE_SET_BYLEX) && (flags & ZRANGE_SET_WITHSCORE)) {
-    char *msg = "-ERR syntax error, WITHSCORES not supported in combination "
-                "with BYLEX\r\n";
+  if ((flags & ZRANGE_SET_BYLEX) && with_scores) {
+    char *msg = "-ERR syntax error, WITHSCORES not supported with BYLEX\r\n";
     append_to_output_buffer(ob, msg, strlen(msg));
     return;
   }
-
-  if ((flags & ZRANGE_SET_LIMIT) &&
-      (!(flags & ZRANGE_SET_BYLEX) && !(flags & ZRANGE_SET_BYSCORE))) {
-    char *msg = "-ERR syntax erorr, LIMIT is only supported in "
-                "combination with either BYSCORE or BYLEX\r\n";
+  if ((flags & ZRANGE_SET_LIMIT) && !(flags & ZRANGE_SET_BYSCORE) &&
+      !(flags & ZRANGE_SET_BYLEX)) {
+    char *msg =
+        "-ERR syntax error, LIMIT only supported with BYSCORE or BYLEX\r\n";
     append_to_output_buffer(ob, msg, strlen(msg));
     return;
   }
 
   r_obj *o = hash_table_get(db, arg_values[1]);
 
-  // int start = atoi(arg_values[2]);
-  // int stop = atoi(arg_values[3]);
-
   if (!o) {
     append_to_output_buffer(ob, "*0\r\n", 4);
     return;
-  } else if (o->type != ZSET) {
-    char *err = "-WRONGTYPE Operation against a key holding the "
-                "wrong kind of value\r\n";
+  }
+
+  if (o->type != ZSET) {
+    char *err = "-WRONGTYPE Operation against a key holding the wrong kind of "
+                "value\r\n";
     append_to_output_buffer(ob, err, strlen(err));
     return;
   }
 
   ZSet *zs = (ZSet *)o->data;
   ZSkipList *zsl = zs->zsl;
+  ZSkipListNode *node;
+  int count = 0;
 
   if (flags & ZRANGE_SET_BYSCORE) {
-    int start = atoi(arg_values[2]);
-    int stop = atoi(arg_values[3]);
+    double start = atof(arg_values[2]);
+    double stop = atof(arg_values[3]);
 
-    ZSkipListNode *node = zsl_first_in_range(zsl, start);
-    int count = 0;
+    if (reverse)
+      node = zsl_last_in_range(zsl, stop);
+    else
+      node = zsl_first_in_range(zsl, start);
 
-    if (flags & ZRANGE_SET_LIMIT) {
-      int skipped = 0;
-      while (node && node->score <= stop && skipped < limit_offset) {
-        node = node->level[0].forward;
-        skipped++;
+    while (node && limit_offset) {
+      if (reverse ? (node->score < start) : (node->score > stop)) {
+        node = NULL;
+        break;
       }
 
-      if (limit_count < 0) {
-        while (node && node->score) {
-
-          char bulk_header[64];
-          int val_len = strlen(node->element);
-          int bh_len =
-              snprintf(bulk_header, sizeof(bulk_header), "$%d\r\n", val_len);
-          append_to_output_buffer(ob, bulk_header, bh_len);
-          append_to_output_buffer(ob, node->element, val_len);
-          append_to_output_buffer(ob, "\r\n", 2);
-          count++;
-
-          node = node->level[0].forward;
-        }
-      } else {
-        while (node && node->score <= stop && limit_count > 0) {
-          char bulk_header[64];
-          int val_len = strlen(node->element);
-          int bh_len =
-              snprintf(bulk_header, sizeof(bulk_header), "$%d\r\n", val_len);
-          append_to_output_buffer(ob, bulk_header, bh_len);
-          append_to_output_buffer(ob, node->element, val_len);
-          append_to_output_buffer(ob, "\r\n", 2);
-          count++;
-
-          node = node->level[0].forward;
-          limit_count--;
-        }
-      }
-    } else {
-      while (node && node->score <= stop) {
-        char bulk_header[64];
-        int val_len = strlen(node->element);
-        int bh_len =
-            snprintf(bulk_header, sizeof(bulk_header), "$%d\r\n", val_len);
-        append_to_output_buffer(ob, bulk_header, bh_len);
-        append_to_output_buffer(ob, node->element, val_len);
-        append_to_output_buffer(ob, "\r\n", 2);
-        count++;
-
-        node = node->level[0].forward;
-      }
+      node = zsl_next_node(node, reverse);
+      limit_offset--;
     }
-    char header[64];
-    int header_len = snprintf(header, sizeof(header), "%d\r\n", count);
-    write(client->fd, header, header_len);
-    return;
+
+    while (node && (limit_count != 0)) {
+      if (reverse ? (node->score < start) : (node->score > stop)) {
+        break;
+      }
+
+      zrange_emit_node(ob, node, with_scores);
+      if (with_scores)
+        count++;
+      count++;
+
+      node = zsl_next_node(node, reverse);
+      if (limit_count > 0)
+        limit_count--;
+    }
   } else if (flags & ZRANGE_SET_BYLEX) {
-    ZSkipListNode *node = zsl_first_in_lex_range(zsl, arg_values[2], 0);
+    int min_inclusive = (arg_values[2][0] == '[');
+    char *min_str = arg_values[2] + 1;
 
-    int start_inclusive = (arg_values[2][0] == '[');
-    char *start_str = arg_values[2] + 1;
+    int max_inclusive = (arg_values[3][0] == '[');
+    char *max_str = arg_values[3] + 1;
 
-    int end_inclusive = (arg_values[3][0] == '[');
-    char *end_str = arg_values[3] + 1;
+    if (reverse)
+      node = zsl_last_in_lex_range(zsl, max_str, max_inclusive);
+    else
+      node = zsl_first_in_lex_range(zsl, min_str, min_inclusive);
 
-    int count = 0;
-
-    if (flags & ZRANGE_SET_LIMIT) {
-      int skipped = 0;
-      while (node && skipped < limit_offset) {
-        int cmp = strcmp(node->element, end_str);
-        if (end_inclusive ? (cmp > 0) : (cmp >= 0)) {
-          break;
-        }
-        node = node->level[0].forward;
-        skipped++;
-      }
-
-      if (limit_count < 0) {
-        while (node) {
-          int cmp = strcmp(node->element, end_str);
-
-          if (end_inclusive ? (cmp > 0) : (cmp >= 0)) {
-            break;
-          }
-
-          char bulk_header[64];
-          int val_len = strlen(node->element);
-          int bh_len =
-              snprintf(bulk_header, sizeof(bulk_header), "$%d\r\n", val_len);
-          append_to_output_buffer(ob, bulk_header, bh_len);
-          append_to_output_buffer(ob, node->element, val_len);
-          append_to_output_buffer(ob, "\r\n", 2);
-          count++;
-          node = node->level[0].forward;
-        }
-      } else {
-
-        while (node && limit_count > 0) {
-          int cmp = strcmp(node->element, end_str);
-
-          if (end_inclusive ? (cmp > 0) : (cmp >= 0)) {
-            break;
-          }
-
-          char bulk_header[64];
-          int val_len = strlen(node->element);
-          int bh_len =
-              snprintf(bulk_header, sizeof(bulk_header), "$%d\r\n", val_len);
-          append_to_output_buffer(ob, bulk_header, bh_len);
-          append_to_output_buffer(ob, node->element, val_len);
-          append_to_output_buffer(ob, "\r\n", 2);
-
-          count++;
-          node = node->level[0].forward;
-          limit_count--;
-        }
-      }
-    } else {
-      while (node) {
-        int cmp = strcmp(node->element, end_str);
-
-        if (end_inclusive ? (cmp > 0) : (cmp >= 0)) {
-          break;
-        }
-
-        char bulk_header[64];
-        int val_len = strlen(node->element);
-        int bh_len =
-            snprintf(bulk_header, sizeof(bulk_header), "$%d\r\n", val_len);
-        append_to_output_buffer(ob, bulk_header, bh_len);
-        append_to_output_buffer(ob, node->element, val_len);
-        append_to_output_buffer(ob, "\r\n", 2);
-        count++;
-        node = node->level[0].forward;
-      }
+    while (node && limit_offset > 0) {
+      node = zsl_next_node(node, reverse);
+      limit_offset--;
     }
-    char header[64];
-    int header_len = snprintf(header, sizeof(header), "*%d\r\n", count);
-    write(client->fd, header, header_len);
-    return;
-  } else {
-    int start = atoi(arg_values[2]);
-    int stop = atoi(arg_values[3]);
 
-    int len = zsl->length;
+    while (node && (limit_count != 0)) {
+      if (reverse) {
+        int cmp = strcmp(node->element, min_str);
+        if (min_inclusive ? cmp < 0 : cmp <= 0)
+          break;
+      } else {
+        int cmp = strcmp(node->element, max_str);
+        if (max_inclusive ? cmp > 0 : cmp >= 0)
+          break;
+      }
+
+      zrange_emit_node(ob, node, 0);
+      count++;
+
+      node = zsl_next_node(node, reverse);
+      if (limit_count > 0)
+        limit_count--;
+    }
+  } else {
+    long start = atoi(arg_values[2]);
+    long stop = atoi(arg_values[3]);
+    long llen = zsl->length;
 
     if (start < 0)
-      start = len + start;
+      start = llen + start;
     if (stop < 0)
-      stop = len + stop;
+      stop = llen + stop;
     if (start < 0)
       start = 0;
 
-    if (start > stop || start >= len) {
+    if (start > stop || start >= llen) {
       append_to_output_buffer(ob, "*0\r\n", 4);
       return;
-    } else {
-      if (stop >= len)
-        stop = len - 1;
+    }
 
-      int range_len = stop - start + 1;
+    if (stop >= llen)
+      stop = llen - 1;
+    long range_len = stop - start + 1;
 
-      char header[64];
-      int header_len = sprintf(header, "*%d\r\n", range_len);
-      append_to_output_buffer(ob, header, header_len);
+    if (reverse)
+      node = zsl_get_element_by_rank(zsl, stop);
+    else
+      node = zsl_get_element_by_rank(zsl, start);
 
-      ZSkipListNode *node = zsl_get_element_by_rank(zsl, start);
+    while (node && range_len > 0) {
+      zrange_emit_node(ob, node, with_scores);
+      if (with_scores)
+        count++;
+      count++;
 
-      while (node && range_len > 0) {
-        // bulk string : "$len\r\nVal\r\n"
-
-        char bulk_header[64];
-        int val_len = strlen(node->element);
-        int bh_len =
-            snprintf(bulk_header, sizeof(bulk_header), "$%d\r\n", val_len);
-        append_to_output_buffer(ob, bulk_header, bh_len);
-        append_to_output_buffer(ob, node->element, val_len);
-        append_to_output_buffer(ob, "\r\n", 2);
-
-        node = node->level[0].forward;
-        range_len--;
-      }
-      return;
+      node = zsl_next_node(node, reverse);
+      range_len--;
     }
   }
+
+  char header[64];
+  int header_len = snprintf(header, sizeof(header), "*%d\r\n", count);
+  write(ob->fd, header, header_len);
 }
 
 void zscore_command(Client *client, HashTable *db, HashTable *expires,

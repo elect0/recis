@@ -1,6 +1,7 @@
 #ifndef ZSET_H
 #define ZSET_H
 
+#include "command.h"
 #include "redis.h"
 
 // Bitmasks for ZADD command
@@ -18,7 +19,7 @@
 #define ZRANGE_SET_BYLEX 1 << 1
 #define ZRANGE_SET_REV 1 << 2
 #define ZRANGE_SET_LIMIT 1 << 3
-#define ZRANGE_SET_WITHSCORE 1 << 4
+#define ZRANGE_SET_WITHSCORES 1 << 4
 
 #define ZSKIPLIST_MAX_LEVEL 32
 #define ZSKIPLIST_P 0.25
@@ -56,6 +57,11 @@ int zset_add(ZSet *zs, char *element, double score);
 void zset_range(ZSet *zs, int min_index, int max_index);
 void zset_destroy(ZSet *zs);
 
+void zrange_emit_node(OutputBuffer *ob, ZSkipListNode *node, int with_scores);
+ZSkipListNode* zsl_next_node(ZSkipListNode *node, int reverse);
+ZSkipListNode *zsl_last_in_range(ZSkipList *zsl, double max);
+    ZSkipListNode *zsl_last_in_lex_range(ZSkipList *zsl, char *max,
+                                         int inclusive);
 ZSkipListNode *zsl_get_element_by_rank(ZSkipList *zsl, int rank);
 ZSkipListNode *zsl_first_in_range(ZSkipList *zsl, double min);
 ZSkipListNode *zsl_first_in_lex_range(ZSkipList *zsl, char *min, int inclusive);

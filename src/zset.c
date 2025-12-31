@@ -1,6 +1,7 @@
 #include "../include/zset.h"
 #include "../include/redis.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -256,6 +257,44 @@ ZSkipListNode *zsl_first_in_range(ZSkipList *zsl, double min) {
   return NULL;
 }
 
+ZSkipListNode *zsl_last_in_range(ZSkipList *zsl, double max) {
+  ZSkipListNode *x = zsl->head;
+  int i;
+  for (i = zsl->level - 1; i >= 0; i--) {
+    while (x->level[i].forward && x->level[i].forward->score <= max) {
+      x = x->level[i].forward;
+    }
+  }
+
+  if (x != zsl->head && x->score <= max) {
+    return x;
+  }
+  return NULL;
+}
+
+ZSkipListNode *zsl_last_in_lex_range(ZSkipList *zsl, char *max, int inclusive) {
+  ZSkipListNode *x = zsl->head;
+  int i;
+
+  for (i = zsl->level - 1; i >= 0; i--) {
+    while (x->level[i].forward) {
+      char *next_val = x->level[i].forward->element;
+      int cmp = strcmp(next_val, max);
+
+      if (inclusive ? (cmp <= 0) : (cmp < 0)) {
+        x = x->level[i].forward;
+      } else {
+        break;
+      }
+    }
+  }
+
+  if (x != zsl->head)
+    return x;
+
+  return NULL;
+}
+
 ZSkipListNode *zsl_first_in_lex_range(ZSkipList *zsl, char *min,
                                       int inclusive) {
   ZSkipListNode *x = zsl->head;
@@ -297,4 +336,28 @@ unsigned long zsl_get_rank(ZSkipList *zsl, double score, char *element) {
   }
 
   return 0;
+}
+
+ZSkipListNode *zsl_next_node(ZSkipListNode *node, int reverse) {
+  return reverse ? node->backward : node->level[0].forward;
+}
+
+void zrange_emit_node(OutputBuffer *ob, ZSkipListNode *node, int with_scores) {
+  char buf[128];
+  int len;
+
+  size_t val_len = strlen(node->element);
+  len = snprintf(buf, sizeof(buf), "$%zu\r\n", val_len);
+  append_to_output_buffer(ob, buf, len);
+  append_to_output_buffer(ob, node->element, val_len);
+  append_to_output_buffer(ob, "\r\n", 2);
+
+  if (with_scores) {
+    len = snprintf(buf, sizeof(buf), "$%d\r\n",
+                   (int)snprintf(NULL, 0, "%.17g", node->score));
+    append_to_output_buffer(ob, buf, len);
+
+    len = snprintf(buf, sizeof(buf), "%.17g\r\n", node->score);
+    append_to_output_buffer(ob, buf, len);
+  }
 }
