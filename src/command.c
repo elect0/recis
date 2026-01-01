@@ -11,17 +11,27 @@
 #include <time.h>
 #include <unistd.h>
 
-Command CommandTable[] = {
-    {"SET", set_command, -3},      {"GET", get_command, 2},
-    {"DEL", del_command, -2},      {"TTL", ttl_command, 2},
-    {"LPUSH", lpush_command, -3},  {"RPUSH", rpush_command, -3},
-    {"RPOP", rpop_command, -2},    {"LPOP", lpop_command, -2},
-    {"LLEN", llen_command, 2},     {"LINDEX", lindex_command, 3},
-    {"LRANGE", lrange_command, 4}, {"LMOVE", lmove_command, 5},
-    {"SADD", sadd_command, -3},    {"SISMEMBER", sismember_command, 3},
-    {"ZADD", zadd_command, -4},    {"ZRANGE", zrange_command, -4},
-    {"ZSCORE", zscore_command, 3}, {"ZRANK", zrank_command, 3},
-    {"SAVE", save_command, 1},     {NULL, NULL, 0}};
+Command CommandTable[] = {{"SET", set_command, -3},
+                          {"GET", get_command, 2},
+                          {"DEL", del_command, -2},
+                          {"TTL", ttl_command, 2},
+                          {"LPUSH", lpush_command, -3},
+                          {"RPUSH", rpush_command, -3},
+                          {"RPOP", rpop_command, -2},
+                          {"LPOP", lpop_command, -2},
+                          {"LLEN", llen_command, 2},
+                          {"LINDEX", lindex_command, 3},
+                          {"LRANGE", lrange_command, 4},
+                          {"LMOVE", lmove_command, 5},
+                          {"LTRIM", ltrim_command, 4},
+                          {"SADD", sadd_command, -3},
+                          {"SISMEMBER", sismember_command, 3},
+                          {"ZADD", zadd_command, -4},
+                          {"ZRANGE", zrange_command, -4},
+                          {"ZSCORE", zscore_command, 3},
+                          {"ZRANK", zrank_command, 3},
+                          {"SAVE", save_command, 1},
+                          {NULL, NULL, 0}};
 
 r_obj *create_command_object(Command *cmd) {
   r_obj *o;
@@ -595,6 +605,65 @@ void lmove_command(Client *client, HashTable *db, HashTable *expires,
   append_to_output_buffer(ob, value, val_len);
   append_to_output_buffer(ob, "\r\n", 2);
 
+  return;
+}
+
+void ltrim_command(Client *client, HashTable *db, HashTable *expires,
+                   OutputBuffer *ob) {
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 4) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, "+OK\r\n", 5);
+    return;
+  }
+
+  if (o->type != LIST) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  List *list = (List *)o->data;
+
+  int start = atoi(arg_values[2]);
+  int stop = atoi(arg_values[3]);
+
+  long llen = list->size;
+
+  if (start < 0)
+    start = llen + start;
+  if (stop < 0)
+    stop = llen + stop;
+  if (start < 0)
+    start = 0;
+
+  if (start > stop || start >= llen) {
+    hash_table_del(db, arg_values[1]);
+    append_to_output_buffer(ob, "+OK\r\n", 5);
+    return;
+  }
+
+  if (stop >= llen)
+    stop = llen - 1;
+
+  for (int i = 0; i < start; i++)
+    list_pop_head(list);
+
+  stop = stop - start;
+
+  while (list->size > stop + 1)
+    list_pop_tail(list);
+
+  append_to_output_buffer(ob, "+OK\r\n", 5);
   return;
 }
 
