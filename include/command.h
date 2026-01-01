@@ -39,6 +39,10 @@ void llen_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob);
 void lindex_command(Client *client, HashTable *db, HashTable *expires,
                     OutputBuffer *ob);
+void lrange_command(Client *client, HashTable *db, HashTable *expires,
+                    OutputBuffer *ob);
+void lmove_command(Client *client, HashTable *db, HashTable *expires,
+                   OutputBuffer *ob);
 void sadd_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob);
 void sismember_command(Client *client, HashTable *db, HashTable *expires,

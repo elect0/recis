@@ -120,6 +120,24 @@ void *list_pop_head(List *list) {
   return value;
 }
 
+ListNode *list_get_node_at(List *list, unsigned long index, int from_tail) {
+  if (index >= list_size(list))
+    return NULL;
+
+  ListNode *member;
+  if (from_tail) {
+    for (member = list->tail; index > 0; index--) {
+      member = member->prev;
+    }
+  } else {
+    for (member = list->head; index > 0; index--) {
+      member = member->next;
+    }
+  }
+
+  return member;
+}
+
 void list_destroy(List *list) {
 
   if (list == NULL)

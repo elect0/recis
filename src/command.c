@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -16,6 +17,7 @@ Command CommandTable[] = {
     {"LPUSH", lpush_command, -3},  {"RPUSH", rpush_command, -3},
     {"RPOP", rpop_command, -2},    {"LPOP", lpop_command, -2},
     {"LLEN", llen_command, 2},     {"LINDEX", lindex_command, 3},
+    {"LRANGE", lrange_command, 4}, {"LMOVE", lmove_command, 5},
     {"SADD", sadd_command, -3},    {"SISMEMBER", sismember_command, 3},
     {"ZADD", zadd_command, -4},    {"ZRANGE", zrange_command, -4},
     {"ZSCORE", zscore_command, 3}, {"ZRANK", zrank_command, 3},
@@ -428,6 +430,171 @@ void lindex_command(Client *client, HashTable *db, HashTable *expires,
   append_to_output_buffer(ob, header, head_len);
   append_to_output_buffer(ob, value, val_len);
   append_to_output_buffer(ob, "\r\n", 2);
+  return;
+}
+
+void lrange_command(Client *client, HashTable *db, HashTable *expires,
+                    OutputBuffer *ob) {
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 4) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, "*0\r\n", 4);
+    return;
+  }
+
+  if (o->type != LIST) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  List *list = (List *)o->data;
+
+  int start = atoi(arg_values[2]);
+  int stop = atoi(arg_values[3]);
+
+  long llen = list->size;
+
+  if (start < 0)
+    start = llen + start;
+  if (stop < 0)
+    stop = llen + stop;
+  if (start < 0)
+    start = 0;
+
+  if (start > stop || start >= llen) {
+    append_to_output_buffer(ob, "*0\r\n", 4);
+    return;
+  }
+
+  int forward = (start <= llen / 2) ? 1 : 0;
+
+  if (stop >= llen)
+    stop = llen - 1;
+  long range_len = stop - start + 1;
+
+  ListNode *node;
+
+  if (forward)
+    node = list_get_node_at(list, start, 0);
+  else
+    node = list_get_node_at(list, start, 1);
+
+  char header[64];
+  int header_len = snprintf(header, sizeof(header), "*%ld\r\n", range_len);
+  append_to_output_buffer(ob, header, header_len);
+
+  while (node && range_len > 0) {
+    char *value = (char *)node->value;
+    size_t val_len = strlen(value);
+
+    char bulk_header[64];
+    int bh_len =
+        snprintf(bulk_header, sizeof(bulk_header), "$%zu\r\n", val_len);
+
+    append_to_output_buffer(ob, bulk_header, bh_len);
+    append_to_output_buffer(ob, value, val_len);
+    append_to_output_buffer(ob, "\r\n", 2);
+    node = forward ? node->next : node->prev;
+    range_len--;
+  }
+
+  return;
+}
+
+void lmove_command(Client *client, HashTable *db, HashTable *expires,
+                   OutputBuffer *ob) {
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 5) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  int flags = 0;
+
+  char *src_option = arg_values[3];
+  if (strcasecmp(src_option, "LEFT") == 0)
+    flags |= LMOVE_SRC_LEFT;
+  else if (strcasecmp(src_option, "RIGHT") == 0)
+    flags |= LMOVE_SRC_RIGHT;
+  else {
+    append_to_output_buffer(ob, "-ERR syntax error\r\n", 19);
+    return;
+  }
+
+  char *dest_option = arg_values[4];
+  if (strcasecmp(dest_option, "LEFT") == 0)
+    flags |= LMOVE_DEST_LEFT;
+  else if (strcasecmp(dest_option, "RIGHT") == 0)
+    flags |= LMOVE_DEST_RIGHT;
+  else {
+    append_to_output_buffer(ob, "-ERR syntax error\r\n", 19);
+    return;
+  }
+
+  r_obj *src_o = hash_table_get(db, arg_values[1]);
+  r_obj *dest_o = hash_table_get(db, arg_values[2]);
+
+  if (!src_o) {
+    append_to_output_buffer(ob, "$-1\r\n", 5);
+    return;
+  }
+
+  if (src_o->type != LIST) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  if (!dest_o) {
+    dest_o = create_list_object();
+    hash_table_set(db, arg_values[2], dest_o);
+  } else if (dest_o != NULL && dest_o->type != LIST) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  List *src_list = (List *)src_o->data;
+  List *dest_list = (List *)dest_o->data;
+
+  char *value;
+
+  if (flags & LMOVE_SRC_LEFT)
+    value = (char *)list_pop_head(src_list);
+  else if (flags & LMOVE_SRC_RIGHT)
+    value = (char *)list_pop_tail(src_list);
+
+  if (!value) {
+    append_to_output_buffer(ob, "$-1\r\n", 5);
+    return;
+  }
+
+  if (flags & LMOVE_DEST_LEFT)
+    list_ins_node_head(dest_list, (const char *)value);
+  else if (flags & LMOVE_DEST_RIGHT)
+    list_ins_node_tail(dest_list, (const char *)value);
+
+  unsigned long val_len = strlen(value);
+  char bulk_header[64];
+  int bh_len = snprintf(bulk_header, sizeof(bulk_header), "$%ld\r\n", val_len);
+  append_to_output_buffer(ob, bulk_header, bh_len);
+  append_to_output_buffer(ob, value, val_len);
+  append_to_output_buffer(ob, "\r\n", 2);
+
   return;
 }
 
