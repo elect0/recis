@@ -53,6 +53,8 @@ void sinter_command(Client *client, HashTable *db, HashTable *expires,
                     OutputBuffer *ob);
 void smembers_command(Client *client, HashTable *db, HashTable *expires,
                       OutputBuffer *ob);
+void scard_command(Client *client, HashTable *db, HashTable *expires,
+                      OutputBuffer *ob);
 void sismember_command(Client *client, HashTable *db, HashTable *expires,
                        OutputBuffer *ob);
 void zadd_command(Client *client, HashTable *db, HashTable *expires,

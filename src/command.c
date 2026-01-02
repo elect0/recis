@@ -13,8 +13,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-
 Command CommandTable[] = {{"SET", set_command, -3},
                           {"GET", get_command, 2},
                           {"DEL", del_command, -2},
@@ -30,6 +28,7 @@ Command CommandTable[] = {{"SET", set_command, -3},
                           {"LTRIM", ltrim_command, 4},
                           {"SADD", sadd_command, -3},
                           {"SREM", srem_command, -3},
+                          {"SCARD", scard_command, 2},
                           {"SINTER", sinter_command, -2},
                           {"SISMEMBER", sismember_command, 3},
                           {"SMEMEBERS", smembers_command, 2},
@@ -852,6 +851,38 @@ void lpop_command(Client *client, HashTable *db, HashTable *expires,
     hash_table_del(db, arg_values[1]);
   }
 
+  return;
+}
+
+void scard_command(Client *client, HashTable *db, HashTable *expires,
+                   OutputBuffer *ob) {
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 2) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, ":0\r\n", 4);
+    return;
+  }
+
+  if (o->type != SET) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  Set *set = (Set *)o->data;
+
+  char resp[64];
+  int resp_len = snprintf(resp, sizeof(resp), ":%zu\r\n", set->count);
+  append_to_output_buffer(ob, resp, resp_len);
   return;
 }
 
