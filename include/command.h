@@ -47,6 +47,12 @@ void ltrim_command(Client *client, HashTable *db, HashTable *expires,
                    OutputBuffer *ob);
 void sadd_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob);
+void srem_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob);
+void sinter_command(Client *client, HashTable *db, HashTable *expires,
+                    OutputBuffer *ob);
+void smembers_command(Client *client, HashTable *db, HashTable *expires,
+                      OutputBuffer *ob);
 void sismember_command(Client *client, HashTable *db, HashTable *expires,
                        OutputBuffer *ob);
 void zadd_command(Client *client, HashTable *db, HashTable *expires,

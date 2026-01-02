@@ -5,11 +5,15 @@
 #include "../include/zset.h"
 #include <ctype.h>
 #include <fcntl.h>
+#include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
+
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 Command CommandTable[] = {{"SET", set_command, -3},
                           {"GET", get_command, 2},
@@ -25,7 +29,10 @@ Command CommandTable[] = {{"SET", set_command, -3},
                           {"LMOVE", lmove_command, 5},
                           {"LTRIM", ltrim_command, 4},
                           {"SADD", sadd_command, -3},
+                          {"SREM", srem_command, -3},
+                          {"SINTER", sinter_command, -2},
                           {"SISMEMBER", sismember_command, 3},
+                          {"SMEMEBERS", smembers_command, 2},
                           {"ZADD", zadd_command, -4},
                           {"ZRANGE", zrange_command, -4},
                           {"ZSCORE", zscore_command, 3},
@@ -891,6 +898,143 @@ void sadd_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
+void srem_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob) {
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count < 3) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, ":0\r\n", 4);
+    return;
+  }
+
+  if (o->type != SET) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  Set *set = (Set *)o->data;
+
+  int j;
+  int count = 0;
+  for (j = 2; j < arg_count; j++) {
+    if (set_rem(set, arg_values[j]) == 1)
+      count++;
+  }
+
+  char resp[64];
+  int resp_len = snprintf(resp, sizeof(resp), ":%d\r\n", count);
+  append_to_output_buffer(ob, resp, resp_len);
+  return;
+}
+
+void sinter_command(Client *client, HashTable *db, HashTable *expires,
+                    OutputBuffer *ob) {
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count < 2) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  Set **sets;
+  if ((sets = (Set **)malloc((arg_count - 1) * sizeof(Set *))) == NULL) {
+    append_to_output_buffer(ob, "-ERR out of memory\r\n", 20);
+    return;
+  }
+
+  int j;
+  int card = 0;
+  Set *small = NULL;
+
+  for (j = 1; j < arg_count; j++) {
+    r_obj *o = hash_table_get(db, arg_values[j]);
+
+    if (!o) {
+      free(sets);
+      append_to_output_buffer(ob, "~0\r\n", 4);
+      return;
+    }
+
+    if (o->type != SET) {
+      free(sets);
+      char *msg = "-WRONGTYPE Operation against a key holding "
+                  "the wrong kind of value\r\n";
+      append_to_output_buffer(ob, msg, strlen(msg));
+      return;
+    }
+
+    Set *set = (Set *)o->data;
+    if (set->size == 0) {
+      free(sets);
+      append_to_output_buffer(ob, "~0\r\n", 4);
+      return;
+    }
+
+    sets[j - 1] = set;
+
+    if (small == NULL || set->size < card) {
+      small = set;
+      card = set->size;
+    }
+  }
+
+  int count = 0;
+
+  for (size_t i = 0; i <= small->size; i++) {
+    Node *entry = small->buckets[i];
+    while (entry) {
+      int in_all = 1;
+
+      for (int j = 0; j < arg_count - 1; j++) {
+        if (sets[j] == small)
+          continue;
+
+        if (!set_is_member(sets[j], entry->key)) {
+          in_all = 0;
+          break;
+        }
+      }
+
+      if (in_all) {
+        char *val = entry->key;
+        size_t val_len = strlen(val);
+
+        printf("%s valoare\n", val);
+
+        char bulk_header[64];
+        int bh_len =
+            snprintf(bulk_header, sizeof(bulk_header), "$%zu\r\n", val_len);
+
+        append_to_output_buffer(ob, bulk_header, bh_len);
+        append_to_output_buffer(ob, val, val_len);
+        append_to_output_buffer(ob, "\r\n", 2);
+
+        count++;
+      }
+
+      entry = entry->next;
+    }
+  }
+
+  free(sets);
+
+  char header[64];
+  int header_len = snprintf(header, sizeof(header), "~%d\r\n", count);
+  write(ob->fd, header, header_len);
+  return;
+}
+
 void sismember_command(Client *client, HashTable *db, HashTable *expires,
                        OutputBuffer *ob) {
   char **arg_values = client->arg_values;
@@ -919,6 +1063,59 @@ void sismember_command(Client *client, HashTable *db, HashTable *expires,
   char resp[64];
   int resp_len = snprintf(resp, sizeof(resp), ":%d\r\n", is_member);
   append_to_output_buffer(ob, resp, resp_len);
+  return;
+}
+
+void smembers_command(Client *client, HashTable *db, HashTable *expires,
+                      OutputBuffer *ob) {
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 2) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, "*0\r\n", 4);
+    return;
+  }
+
+  if (o->type != SET) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  Set *set = (Set *)o->data;
+  size_t count = set->count;
+
+  char header[64];
+  int header_len = snprintf(header, sizeof(header), "*%zu\r\n", count);
+  append_to_output_buffer(ob, header, header_len);
+
+  int j;
+  for (j = 0; j < set->size; j++) {
+    Node *entry = set->buckets[j];
+    while (entry) {
+      char *val = entry->key;
+      size_t val_len = strlen(val);
+
+      char bulk_header[64];
+      int bh_len =
+          snprintf(bulk_header, sizeof(bulk_header), "$%zu\r\n", val_len);
+
+      append_to_output_buffer(ob, bulk_header, bh_len);
+      append_to_output_buffer(ob, val, val_len);
+      append_to_output_buffer(ob, "\r\n", 2);
+
+      entry = entry->next;
+    }
+  }
+
   return;
 }
 

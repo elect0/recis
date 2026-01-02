@@ -34,12 +34,9 @@ int set_rem(Set *set, char *member) {
   if (hash_table_get(set, member) == NULL)
     return 0;
 
-  hash_table_del(set, member);
-  return 1;
+  return hash_table_del(set, member);
 }
 
 int set_is_member(Set *set, char *member) {
   return hash_table_get(set, member) != NULL;
 }
-
-
