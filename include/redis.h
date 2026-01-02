@@ -47,6 +47,7 @@ r_obj *create_int_object(long long value);
 r_obj *create_double_object(double value);
 void free_object(r_obj *o);
 
+r_obj *create_hash_object();
 HashTable *hash_table_create(size_t size);
 void hash_table_set(HashTable *hash_table, const char *key, r_obj *val);
 r_obj *hash_table_get(HashTable *hash_table, const char *key);

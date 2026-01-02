@@ -4,8 +4,11 @@
 #include "../include/set.h"
 #include "../include/zset.h"
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +35,10 @@ Command CommandTable[] = {{"SET", set_command, -3},
                           {"SINTER", sinter_command, -2},
                           {"SISMEMBER", sismember_command, 3},
                           {"SMEMEBERS", smembers_command, 2},
+                          {"HSET", hset_command, -4},
+                          {"HGET", hget_command, 3},
+                          {"HMGET", hmget_command, -3},
+                          {"HINCRBY", hincrby_command, 4},
                           {"ZADD", zadd_command, -4},
                           {"ZRANGE", zrange_command, -4},
                           {"ZSCORE", zscore_command, 3},
@@ -65,6 +72,23 @@ int is_valid_alpha_string(const char *str) {
         (unsigned char)*str != '(')
       return 0;
   }
+  return 1;
+}
+
+int try_parse_int64(const char *s, int64_t *out) {
+  if (*s == '\0')
+    return 0;
+
+  char *end;
+  errno = 0;
+  long long val = strtoll(s, &end, 10);
+
+  if (errno != 0)
+    return 0;
+  if (*end != '\0')
+    return 0;
+
+  *out = val;
   return 1;
 }
 
@@ -1147,6 +1171,221 @@ void smembers_command(Client *client, HashTable *db, HashTable *expires,
     }
   }
 
+  return;
+}
+
+void hset_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob) {
+
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count < 4 || arg_count % 2 != 0) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (o != NULL && o->type != HASH) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  if (o == NULL) {
+    o = create_hash_object();
+    hash_table_set(db, arg_values[1], o);
+  }
+
+  int count = 0;
+  int j;
+  for (j = 2; j < arg_count; j++) {
+    char *field = arg_values[j];
+    char *value = arg_values[++j];
+    hash_table_set((HashTable *)o->data, field, create_string_object(value));
+    count++;
+  }
+
+  char resp[64];
+  int resp_len = snprintf(resp, sizeof(resp), ":%d\r\n", count);
+  append_to_output_buffer(ob, resp, resp_len);
+  return;
+}
+
+void hget_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob) {
+
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 3) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+  if (!o) {
+    append_to_output_buffer(ob, "_\r\n", 3);
+    return;
+  }
+
+  if (o->type != HASH) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  HashTable *hash = (HashTable *)o->data;
+  r_obj *hash_o = hash_table_get(hash, arg_values[2]);
+  if (hash_o == NULL) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  char *val = (char *)hash_o->data;
+  size_t val_len = strlen(val);
+
+  char bulk_header[64];
+  int bh_len = snprintf(bulk_header, sizeof(bulk_header), "$%zu\r\n", val_len);
+
+  append_to_output_buffer(ob, bulk_header, bh_len);
+  append_to_output_buffer(ob, val, val_len);
+  append_to_output_buffer(ob, "\r\n", 2);
+
+  return;
+}
+
+void hmget_command(Client *client, HashTable *db, HashTable *expires,
+                   OutputBuffer *ob) {
+
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count < 3) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+  if (!o) {
+    append_to_output_buffer(ob, "*0\r\n", 4);
+    return;
+  }
+
+  if (o->type != HASH) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  HashTable *hash = (HashTable *)o->data;
+
+  char header[64];
+  int header_len = snprintf(header, sizeof(header), "*%d\r\n", arg_count - 2);
+  append_to_output_buffer(ob, header, header_len);
+
+  for (int j = 2; j < arg_count; j++) {
+    char *field = arg_values[j];
+
+    r_obj *field_o = hash_table_get(hash, field);
+
+    if (field_o == NULL) {
+      append_to_output_buffer(ob, "_\r\n", 3);
+      continue;
+    }
+
+    char *val = (char *)field_o->data;
+    size_t val_len = strlen(val);
+
+    char bulk_header[64];
+    int bh_len =
+        snprintf(bulk_header, sizeof(bulk_header), "$%zu\r\n", val_len);
+
+    append_to_output_buffer(ob, bulk_header, bh_len);
+    append_to_output_buffer(ob, val, val_len);
+    append_to_output_buffer(ob, "\r\n", 2);
+  }
+
+  return;
+}
+
+void hincrby_command(Client *client, HashTable *db, HashTable *expires,
+                     OutputBuffer *ob) {
+  char **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 4) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  int64_t increment = 0;
+  if (try_parse_int64(arg_values[3], &increment) == 0) {
+    char *msg = "-value is not an integer or out of range\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (o != NULL && o->type != HASH) {
+    char *msg = "-WRONGTYPE Operation against a key holding "
+                "the wrong kind of value\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  if (o == NULL) {
+    o = create_hash_object();
+    hash_table_set(db, arg_values[1], o);
+  }
+
+  HashTable *hash = (HashTable *)o->data;
+
+  r_obj *field_o = hash_table_get(hash, arg_values[2]);
+  if (field_o == NULL) {
+    char num_str[64];
+    int num_len = snprintf(num_str, sizeof(num_str), "%" PRId64, increment);
+
+    field_o = create_string_object(num_str);
+    hash_table_set(hash, arg_values[2], field_o);
+
+    char resp[64];
+    int resp_len = snprintf(resp, sizeof(resp), ":%s\r\n", num_str);
+    append_to_output_buffer(ob, resp, resp_len);
+    return;
+  }
+
+  int64_t current_score = 0;
+  if (try_parse_int64((char *)field_o->data, &current_score) == 0) {
+    char *msg = "-hash value is not an integer\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  if ((increment > 0 && current_score > INT64_MAX - increment) ||
+      (increment < 0 && current_score < INT64_MIN - increment)) {
+    char *msg = "-ERR increment or decrement would overflow\r\n";
+    append_to_output_buffer(ob, msg, strlen(msg));
+    return;
+  }
+
+  current_score += increment;
+
+  char num_str[64];
+  int num_len = snprintf(num_str, sizeof(num_str), "%" PRId64, current_score);
+
+  free(field_o->data);
+  field_o->data = strdup(num_str);
+  hash_table_set(hash, arg_values[2], field_o);
+
+  char resp[64];
+  int resp_len = snprintf(resp, sizeof(resp), ":%s\r\n", num_str);
+  append_to_output_buffer(ob, resp, resp_len);
   return;
 }
 

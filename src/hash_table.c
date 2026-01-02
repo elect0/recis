@@ -52,6 +52,22 @@ static void hash_table_resize(HashTable *hash_table) {
   return;
 }
 
+r_obj *create_hash_object() {
+  r_obj *o;
+  if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL)
+    return NULL;
+
+  o->type = HASH;
+  o->data = hash_table_create(64);
+
+  if (o->data == NULL) {
+    free(o);
+    return NULL;
+  }
+
+  return o;
+}
+
 HashTable *hash_table_create(size_t size) {
   HashTable *hash_table;
 

@@ -54,9 +54,17 @@ void sinter_command(Client *client, HashTable *db, HashTable *expires,
 void smembers_command(Client *client, HashTable *db, HashTable *expires,
                       OutputBuffer *ob);
 void scard_command(Client *client, HashTable *db, HashTable *expires,
-                      OutputBuffer *ob);
+                   OutputBuffer *ob);
 void sismember_command(Client *client, HashTable *db, HashTable *expires,
                        OutputBuffer *ob);
+void hset_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob);
+void hget_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob); 
+void hmget_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob);
+void hincrby_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob);
 void zadd_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob);
 void zrange_command(Client *client, HashTable *db, HashTable *expires,

@@ -10,6 +10,7 @@
 #define RDB_TYPE_STRING 0
 #define RDB_TYPE_LIST 1
 #define RDB_TYPE_SET 2
+#define RDB_TYPE_HASH 3
 #define RDB_TYPE_ZSET 6
 
 void rdb_save(HashTable *db, HashTable *expires, char *filename) {
@@ -49,7 +50,7 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
         fwrite(&val_len, sizeof(int), 1, fp);
         fwrite(str_val, val_len, 1, fp);
       } else if (val->type == SET) {
-        HashTable *set_ht = (HashTable *)val->data;
+        HashTable *set_ht = (Set *)val->data;
 
         int count = set_ht->count;
         fwrite(&count, sizeof(int), 1, fp);
@@ -66,6 +67,32 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
             set_node = set_node->next;
           }
         }
+      } else if (val->type == HASH) {
+        HashTable *ht = (HashTable *)val->data;
+
+        int count = ht->count;
+        fwrite(&count, sizeof(int), 1, fp);
+
+        for (size_t j = 0; j < ht->size; j++) {
+          Node *set_node = ht->buckets[j];
+          while (set_node) {
+            char *field = set_node->key;
+            int field_len = strlen(field);
+
+            fwrite(&field_len, sizeof(int), 1, fp);
+            fwrite(field, field_len, 1, fp);
+
+            r_obj *value_o = (r_obj *)set_node->value;
+            char *value = (char *)value_o->data;
+            int value_len = strlen(value);
+
+            fwrite(&value_len, sizeof(int), 1, fp);
+            fwrite(value, value_len, 1, fp);
+
+            set_node = set_node->next;
+          }
+        }
+
       } else if (val->type == LIST) {
         List *list = (List *)val->data;
 
@@ -155,9 +182,36 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
         fread(member, member_len, 1, fp);
         member[member_len] = '\0';
 
-        set_add((HashTable *)o->data, member);
+        set_add((Set *)o->data, member);
       }
 
+      hash_table_set(db, strdup(key), o);
+    } else if (type == RDB_TYPE_HASH) {
+      int count;
+      if (fread(&count, sizeof(int), 1, fp) != 1)
+        break;
+
+      r_obj *o = create_hash_object();
+
+      for (int i = 0; i < count; i++) {
+        int field_len;
+        fread(&field_len, sizeof(int), 1, fp);
+
+        char *field = (char *)malloc(field_len + 1);
+        fread(field, field_len, 1, fp);
+        field[field_len] = '\0';
+
+        int value_len;
+        fread(&value_len, sizeof(int), 1, fp);
+
+        char *value = (char *)malloc(value_len + 1);
+        fread(value, value_len, 1, fp);
+        value[value_len] = '\0';
+
+
+        hash_table_set((HashTable *)o->data, field,
+                       create_string_object(value));
+      }
       hash_table_set(db, strdup(key), o);
     } else if (type == RDB_TYPE_LIST) {
       int size;
