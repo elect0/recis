@@ -174,6 +174,10 @@ void free_object(r_obj *o) {
     if (o->data)
       free(o->data);
     break;
+  case INT:
+    if (o->data)
+      free(o->data);
+    break;
   case LIST:
     if (o->data)
       list_destroy((List *)o->data);

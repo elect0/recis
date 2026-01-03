@@ -120,7 +120,7 @@ void *list_pop_head(List *list) {
   return value;
 }
 
-ListNode *list_get_node_at(List *list, unsigned long index, int from_tail) {
+ListNode *list_get_node_at(List *list, size_t index, int from_tail) {
   if (index >= list_size(list))
     return NULL;
 

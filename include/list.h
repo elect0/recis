@@ -18,7 +18,7 @@ typedef struct ListNode_ {
 } ListNode;
 
 typedef struct List_ {
-  unsigned long size;
+  size_t size;
 
   ListNode *tail;
   ListNode *head;

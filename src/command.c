@@ -166,7 +166,7 @@ void set_command(Client *client, HashTable *db, HashTable *expires,
   int ifeq = flags & OBJ_SET_IFEQ;
   int ifne = flags & OBJ_SET_IFNE;
 
-  if (nx && xx || ifeq && ifne) {
+  if ((nx && xx) || (ifeq && ifne)) {
     append_to_output_buffer(ob, "-ERR syntax error\r\n", 19);
     return;
   }

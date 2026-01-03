@@ -41,7 +41,7 @@ typedef struct ZSkipList_ {
   ZSkipListNode *head;
   ZSkipListNode *tail;
 
-  unsigned long length;
+  size_t length;
   int level;
 } ZSkipList;
 
@@ -58,10 +58,9 @@ void zset_range(ZSet *zs, int min_index, int max_index);
 void zset_destroy(ZSet *zs);
 
 void zrange_emit_node(OutputBuffer *ob, ZSkipListNode *node, int with_scores);
-ZSkipListNode* zsl_next_node(ZSkipListNode *node, int reverse);
+ZSkipListNode *zsl_next_node(ZSkipListNode *node, int reverse);
 ZSkipListNode *zsl_last_in_range(ZSkipList *zsl, double max);
-    ZSkipListNode *zsl_last_in_lex_range(ZSkipList *zsl, char *max,
-                                         int inclusive);
+ZSkipListNode *zsl_last_in_lex_range(ZSkipList *zsl, char *max, int inclusive);
 ZSkipListNode *zsl_get_element_by_rank(ZSkipList *zsl, int rank);
 ZSkipListNode *zsl_first_in_range(ZSkipList *zsl, double min);
 ZSkipListNode *zsl_first_in_lex_range(ZSkipList *zsl, char *min, int inclusive);

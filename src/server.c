@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,17 +13,16 @@
 #include <unistd.h>
 
 #include "../include/command.h"
-#include "../include/list.h"
 #include "../include/networking.h"
 #include "../include/parser.h"
 #include "../include/persistance.h"
 #include "../include/redis.h"
-#include "../include/set.h"
-#include "../include/zset.h"
 
 #define PORT 6379
 #define BUFFER_SIZE 1024
 #define MAX_EVENTS 10
+
+#define EXPIRE_SAMPLE_COUNT 20
 
 void set_nonblocking(int fd) {
   int flags = fcntl(fd, F_GETFL, 0);
@@ -37,14 +37,22 @@ void set_nonblocking(int fd) {
 }
 
 void active_expire_cycle(HashTable *db, HashTable *expires) {
-  for (int i = 0; (size_t)i < expires->size; i++) {
-    Node *node = expires->buckets[i];
+  if (expires->count == 0)
+    return;
+
+  uint64_t now = get_time_ms();
+
+  for (int i = 0; i < EXPIRE_SAMPLE_COUNT; i++) {
+    size_t idx = rand() % expires->size;
+    Node *node = expires->buckets[idx];
+
     while (node) {
       Node *next = node->next;
 
       long long *kill_time = (long long *)node->value->data;
-      if (get_time_ms() > *kill_time) {
-        printf("Active expiry: Deleting '%s'\n", node->key);
+
+      if (now > *kill_time) {
+        printf("[Active expire]: Deleting '%s'\n", node->key);
         hash_table_del(db, node->key);
         hash_table_del(expires, node->key);
       }
@@ -88,7 +96,7 @@ int main() {
   }
 
   HashTable *db = hash_table_create(1024);
-  HashTable *expires = hash_table_create(1024);
+  HashTable *expires = hash_table_create(16);
   HashTable *cmd_registry = hash_table_create(32);
 
   populate_command_table(cmd_registry);
