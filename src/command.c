@@ -22,6 +22,7 @@ Command CommandTable[] = {{"SET", set_command, -3},
                           {"DEL", del_command, -2},
                           {"TTL", ttl_command, 2},
                           {"INCR", incr_command, 2},
+                          {"INCRBY", incrby_command, 3},
                           {"LPUSH", lpush_command, -3},
                           {"RPUSH", rpush_command, -3},
                           {"RPOP", rpop_command, -2},
@@ -375,7 +376,6 @@ void ttl_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-
 void incr_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob) {
   Bytes **arg_values = client->arg_values;
@@ -470,6 +470,111 @@ void incrby_command(Client *client, HashTable *db, HashTable *expires,
   }
 
   value += increment;
+
+  char num_str[64];
+  int num_len = snprintf(num_str, sizeof(num_str), "%" PRId64, value);
+  hash_table_set(db, arg_values[1], create_string_object(num_str, num_len));
+
+  char resp[64];
+  int resp_len = snprintf(resp, sizeof(resp), ":%s\r\n", num_str);
+  append_to_output_buffer(ob, resp, resp_len);
+  return;
+}
+
+void decr_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob) {
+  Bytes **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 2) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+  int64_t value = 0;
+
+  if (o != NULL) {
+    if (o->type != STRING) {
+      append_to_output_buffer(ob,
+                              "-WRONGTYPE Operation against a key holding the "
+                              "wrong kind of value\r\n",
+                              68);
+      return;
+    }
+
+    Bytes *o_bytes = (Bytes *)o->data;
+    if (try_parse_int64(o_bytes->data, &value) == 0) {
+      append_to_output_buffer(
+          ob, "-value is not an integer or out of range\r\n", 42);
+      return;
+    }
+  }
+
+  if (value == INT64_MIN) {
+    append_to_output_buffer(
+        ob, "-ERR increment or decrement would overflow\r\n", 44);
+    return;
+  }
+
+  value--;
+
+  char num_str[64];
+  int num_len = snprintf(num_str, sizeof(num_str), "%" PRId64, value);
+  hash_table_set(db, client->arg_values[1],
+                 create_string_object(num_str, num_len));
+  char resp[64];
+  int resp_len = snprintf(resp, sizeof(resp), ":%s\r\n", num_str);
+  append_to_output_buffer(ob, resp, resp_len);
+  return;
+}
+
+void decrby_command(Client *client, HashTable *db, HashTable *expires,
+                    OutputBuffer *ob) {
+  Bytes **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 3) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  int64_t decrement = 0;
+  if (try_parse_int64(arg_values[2]->data, &decrement) == 0) {
+    append_to_output_buffer(ob, "-value is not an integer or out of range\r\n",
+                            42);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  int64_t value = 0;
+
+  if (o != NULL) {
+    if (o->type != STRING) {
+      append_to_output_buffer(ob,
+                              "-WRONGTYPE Operation against a key holding the "
+                              "wrong kind of value\r\n",
+                              68);
+      return;
+    }
+
+    Bytes *o_bytes = (Bytes *)o->data;
+    if (try_parse_int64(o_bytes->data, &value) == 0) {
+      append_to_output_buffer(
+          ob, "-value is not an integer or out of range\r\n", 42);
+      return;
+    }
+  }
+
+  if ((decrement > 0 && value < INT64_MIN + decrement) ||
+      (decrement < 0 && value > INT64_MAX + decrement)) {
+    append_to_output_buffer(
+        ob, "-ERR increment or decrement would overflow\r\n", 44);
+    return;
+  }
+
+  value -= decrement;
 
   char num_str[64];
   int num_len = snprintf(num_str, sizeof(num_str), "%" PRId64, value);
