@@ -1,5 +1,6 @@
 #include "../include/persistance.h"
 #include "../include/list.h"
+#include "../include/recis.h"
 #include "../include/set.h"
 #include "../include/zset.h"
 #include <stdint.h>
@@ -25,7 +26,7 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
   for (size_t i = 0; i < db->size; i++) {
     Node *node = db->buckets[i];
     while (node) {
-      char *key = node->key;
+      Bytes *key = node->key;
       r_obj *val = (r_obj *)node->value;
 
       r_obj *expire_entry = hash_table_get(expires, key);
@@ -40,14 +41,17 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
 
       fwrite(&expire_time, sizeof(uint64_t), 1, fp);
 
-      uint32_t key_len = (uint32_t)strlen(key);
+      uint32_t key_len = key->length;
+
       fwrite(&key_len, sizeof(uint32_t), 1, fp);
 
-      fwrite(key, key_len, 1, fp);
+      fwrite(key->data, key_len, 1, fp);
 
       if (val->type == STRING) {
-        char *str_val = (char *)val->data;
-        uint32_t val_len = (uint32_t)strlen(str_val);
+        Bytes *b = (Bytes *)val->data;
+
+        char *str_val = b->data;
+        uint32_t val_len = b->length;
 
         fwrite(&val_len, sizeof(uint32_t), 1, fp);
         fwrite(str_val, val_len, 1, fp);
@@ -60,11 +64,11 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
         for (size_t j = 0; j < set_ht->size; j++) {
           Node *set_node = set_ht->buckets[j];
           while (set_node) {
-            char *member = set_node->key;
-            uint32_t member_len = (uint32_t)strlen(member);
+            Bytes *member = set_node->key;
+            uint32_t member_len = member->length;
 
             fwrite(&member_len, sizeof(uint32_t), 1, fp);
-            fwrite(member, member_len, 1, fp);
+            fwrite(member->data, member_len, 1, fp);
 
             set_node = set_node->next;
           }
@@ -78,18 +82,18 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
         for (size_t j = 0; j < ht->size; j++) {
           Node *set_node = ht->buckets[j];
           while (set_node) {
-            char *field = set_node->key;
-            uint32_t field_len = (uint32_t)strlen(field);
+            Bytes *field = set_node->key;
+            uint32_t field_len = field->length;
 
             fwrite(&field_len, sizeof(uint32_t), 1, fp);
-            fwrite(field, field_len, 1, fp);
+            fwrite(field->data, field_len, 1, fp);
 
             r_obj *value_o = (r_obj *)set_node->value;
-            char *value = (char *)value_o->data;
-            uint32_t value_len = (uint32_t)strlen(value);
+            Bytes *value_bytes = (Bytes *)value_o->data;
+            uint32_t value_len = value_bytes->length;
 
             fwrite(&value_len, sizeof(uint32_t), 1, fp);
-            fwrite(value, value_len, 1, fp);
+            fwrite(value_bytes->data, value_len, 1, fp);
 
             set_node = set_node->next;
           }
@@ -103,11 +107,12 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
 
         ListNode *member;
         for (member = list->head; member != NULL; member = member->next) {
-          char *item = member->value;
-          uint32_t item_len = (uint32_t)strlen(item);
+          r_obj *item_o = member->value;
+          Bytes *item_bytes = item_o->data;
+          uint32_t item_len = item_bytes->length;
 
           fwrite(&item_len, sizeof(uint32_t), 1, fp);
-          fwrite(item, item_len, 1, fp);
+          fwrite(item_bytes->data, item_len, 1, fp);
         }
       } else if (val->type == ZSET) {
         ZSet *zs = (ZSet *)val->data;
@@ -118,9 +123,10 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
 
         ZSkipListNode *node = zsl->head->level[0].forward;
         while (node) {
-          uint32_t mem_len = (uint32_t)strlen(node->element);
-          fwrite(&mem_len, sizeof(int), 1, fp);
-          fwrite(node->element, mem_len, 1, fp);
+          Bytes *element = node->element;
+          uint32_t mem_len = element->length;
+          fwrite(&mem_len, sizeof(uint32_t), 1, fp);
+          fwrite(element->data, mem_len, 1, fp);
 
           fwrite(&node->score, sizeof(double), 1, fp);
 
@@ -166,9 +172,9 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
       fread(val_str, val_len, 1, fp);
       val_str[val_len] = '\0';
 
-      r_obj *o = create_string_object(val_str);
+      r_obj *o = create_string_object(val_str, val_len);
 
-      hash_table_set(db, strdup(key), o);
+      hash_table_set(db, create_bytes_object(val_str, val_len), o);
       free(val_str);
     } else if (type == RDB_TYPE_SET) {
       uint64_t count;
@@ -185,11 +191,11 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
         fread(member, member_len, 1, fp);
         member[member_len] = '\0';
 
-        set_add((Set *)o->data, member);
+        set_add((Set *)o->data, create_bytes_object(member, member_len));
         free(member);
       }
 
-      hash_table_set(db, strdup(key), o);
+      hash_table_set(db, create_bytes_object(key, key_len), o);
     } else if (type == RDB_TYPE_HASH) {
       uint64_t count;
       if (fread(&count, sizeof(uint64_t), 1, fp) != 1)
@@ -212,12 +218,13 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
         fread(value, value_len, 1, fp);
         value[value_len] = '\0';
 
-        hash_table_set((HashTable *)o->data, field,
-                       create_string_object(value));
+        hash_table_set((HashTable *)o->data,
+                       create_bytes_object(field, field_len),
+                       create_string_object(value, value_len));
         free(field);
         free(value);
       }
-      hash_table_set(db, strdup(key), o);
+      hash_table_set(db, create_bytes_object(key, key_len), o);
     } else if (type == RDB_TYPE_LIST) {
       uint64_t size;
       if (fread(&size, sizeof(uint64_t), 1, fp) != 1)
@@ -235,9 +242,9 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
 
         val_str[val_len] = '\0';
 
-        list_ins_node_tail(list, val_str);
+        list_ins_node_tail(list, create_string_object(val_str, val_len));
       }
-      hash_table_set(db, strdup(key), o);
+      hash_table_set(db, create_bytes_object(key, key_len), o);
     } else if (type == RDB_TYPE_ZSET) {
       uint64_t length;
       if (fread(&length, sizeof(uint64_t), 1, fp) != 1)
@@ -256,19 +263,20 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
         double score;
         fread(&score, sizeof(double), 1, fp);
 
-        zset_add(zs, member, score);
+        zset_add(zs, create_bytes_object(member, mem_len), score);
         free(member);
       }
-      hash_table_set(db, strdup(key), o);
+      hash_table_set(db, create_bytes_object(key, key_len), o);
     }
     if (expire_time > 0) {
       time_t now = time(NULL);
       uint64_t current_ms = (uint64_t)now * 1000;
 
       if (expire_time < current_ms) {
-        hash_table_del(db, key);
+        hash_table_del(db, create_bytes_object(key, key_len));
       } else {
-        hash_table_set(expires, strdup(key), create_int_object(expire_time));
+        hash_table_set(expires, create_bytes_object(key, key_len),
+                       create_int_object(expire_time));
       }
     }
 

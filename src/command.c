@@ -1,6 +1,7 @@
 #include "../include/command.h"
 #include "../include/list.h"
 #include "../include/persistance.h"
+#include "../include/recis.h"
 #include "../include/set.h"
 #include "../include/zset.h"
 #include <ctype.h>
@@ -55,12 +56,26 @@ r_obj *create_command_object(Command *cmd) {
   return o;
 }
 
-void populate_command_table(HashTable *registry) {
+// void populate_command_table(HashTable *registry) {
+//   for (int i = 0; CommandTable[i].name != NULL; i++) {
+//     r_obj *o = create_command_object(&CommandTable[i]);
+//
+//     hash_table_set(registry, create_bytes_object(CommandTable[i].name, o);
+//   }
+// }
+Command *command_lookup(char *name, int len) {
   for (int i = 0; CommandTable[i].name != NULL; i++) {
-    r_obj *o = create_command_object(&CommandTable[i]);
+    char *cmd_name = CommandTable[i].name;
 
-    hash_table_set(registry, CommandTable[i].name, o);
+    if (strlen(cmd_name) != len)
+      continue;
+
+    if (strncasecmp(name, cmd_name, len) == 0) {
+      return &CommandTable[i];
+    }
   }
+
+  return NULL;
 }
 
 int is_valid_alpha_string(const char *str) {
@@ -96,7 +111,7 @@ long long get_time_ms() { return (long long)time(NULL) * 1000; }
 
 void set_command(Client *client, HashTable *db, HashTable *expires,
                  OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 3) {
@@ -107,12 +122,14 @@ void set_command(Client *client, HashTable *db, HashTable *expires,
   int flags = OBJ_SET_NO_FLAGS;
   long long expire_at = -1;
 
-  char *ifeq_val = NULL;
-  char *ifne_val = NULL;
+  Bytes *ifeq_val = NULL;
+  Bytes *ifne_val = NULL;
 
   int j;
   for (j = 3; j < arg_count; j++) {
-    char *option = arg_values[j];
+    Bytes *option_o = arg_values[j];
+    char *option = option_o->data;
+
     if (strcasecmp(option, "NX") == 0) {
       flags |= OBJ_SET_NX;
     } else if (strcasecmp(option, "XX") == 0) {
@@ -122,28 +139,28 @@ void set_command(Client *client, HashTable *db, HashTable *expires,
     } else if (strcasecmp(option, "KEEPTTL") == 0) {
       flags |= OBJ_SET_KEEPTTL;
     } else if (strcasecmp(option, "EX") == 0 && j + 1 < arg_count) {
-      long long value = atoll(arg_values[++j]);
+      long long value = atoll(arg_values[++j]->data);
       if (value <= 0) {
         append_to_output_buffer(ob, "-ERR invalid expire time\r\n", 26);
         return;
       }
       expire_at = get_time_ms() + (value * 1000);
     } else if (strcasecmp(option, "PX") == 0 && j + 1 < arg_count) {
-      long long value = atoll(arg_values[++j]);
+      long long value = atoll(arg_values[++j]->data);
       if (value <= 0) {
         append_to_output_buffer(ob, "-ERR invalid expire time\r\n", 26);
         return;
       }
       expire_at = get_time_ms() + value;
     } else if (strcasecmp(option, "EXAT") == 0 && j + 1 < arg_count) {
-      long long value = atoll(arg_values[++j]);
+      long long value = atoll(arg_values[++j]->data);
       if (value <= 0) {
         append_to_output_buffer(ob, "-ERR invalid expire time\r\n", 26);
         return;
       }
       expire_at = value * 1000;
     } else if (strcasecmp(option, "PXAT") == 0 && j + 1 < arg_count) {
-      long long value = atoll(arg_values[++j]);
+      long long value = atoll(arg_values[++j]->data);
       if (value <= 0) {
         append_to_output_buffer(ob, "-ERR invalid expire time\r\n", 26);
         return;
@@ -174,12 +191,12 @@ void set_command(Client *client, HashTable *db, HashTable *expires,
   r_obj *o = hash_table_get(db, arg_values[1]);
 
   if (nx && o != NULL) {
-    append_to_output_buffer(ob, "-ERR syntax error\r\n", 19);
+    append_to_output_buffer(ob, "_\r\n", 3);
     return;
   }
 
   if (xx && o == NULL) {
-    append_to_output_buffer(ob, "-ERR syntax error\r\n", 19);
+    append_to_output_buffer(ob, "_\r\n", 3);
     return;
   }
 
@@ -194,7 +211,7 @@ void set_command(Client *client, HashTable *db, HashTable *expires,
       return;
     }
 
-    if (strcmp((char *)o->data, ifeq_val) != 0) {
+    if (bytes_equal((Bytes *)o->data, ifeq_val) == 0) {
       append_to_output_buffer(ob, "_\r\n", 3);
       return;
     }
@@ -202,19 +219,21 @@ void set_command(Client *client, HashTable *db, HashTable *expires,
 
   if (ifne) {
     if (o != NULL) {
-      if (o->type == STRING && strcmp((char *)o->data, ifne_val) == 0) {
+      if (o->type == STRING && bytes_equal((Bytes *)o->data, ifne_val) != 0) {
         append_to_output_buffer(ob, "_\r\n", 3);
         return;
       }
     }
   }
 
-  char resp_buf[256];
-  int resp_len = 0;
+  if ((flags & OBJ_SET_KEEPTTL) && expire_at != -1) {
+    append_to_output_buffer(ob, "-ERR syntax error\r\n", 19);
+    return;
+  }
 
   if (flags & OBJ_SET_GET) {
     if (o == NULL) {
-      resp_len = snprintf(resp_buf, sizeof(resp_buf), "_\r\n");
+      append_to_output_buffer(ob, "_\r\n", 3);
     } else if (o->type != STRING) {
       append_to_output_buffer(ob,
                               "-WRONGTYPE Operation against a key holding the "
@@ -222,12 +241,16 @@ void set_command(Client *client, HashTable *db, HashTable *expires,
                               68);
       return;
     } else {
-      char *old = (char *)o->data;
-      snprintf(resp_buf, sizeof(resp_buf), "$%lu\r\n%s\r\n", strlen(old), old);
+      Bytes *old = (Bytes *)o->data;
+      char header[64];
+      int head_len =
+          snprintf(header, sizeof(header), "$%" PRIu32 "\r\n", old->length);
+
+      append_to_output_buffer(ob, header, head_len);
+      append_to_output_buffer(ob, old->data, old->length);
+      append_to_output_buffer(ob, "\r\n", 2);
     }
   }
-
-  resp_len = strlen(resp_buf);
 
   if ((flags & OBJ_SET_KEEPTTL) && o != NULL && expire_at == -1) {
     r_obj *ttl = hash_table_get(expires, arg_values[1]);
@@ -236,7 +259,9 @@ void set_command(Client *client, HashTable *db, HashTable *expires,
     }
   }
 
-  r_obj *new_obj = create_string_object(arg_values[2]);
+  Bytes *val = arg_values[2];
+
+  r_obj *new_obj = create_string_object(val->data, val->length);
   hash_table_set(db, arg_values[1], new_obj);
 
   if (expire_at != -1) {
@@ -247,15 +272,13 @@ void set_command(Client *client, HashTable *db, HashTable *expires,
 
   if (!(flags & OBJ_SET_GET)) {
     append_to_output_buffer(ob, "+OK\r\n", 5);
-  } else {
-    append_to_output_buffer(ob, resp_buf, resp_len);
   }
   return;
 }
 
 void get_command(Client *client, HashTable *db, HashTable *expires,
                  OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 2) {
@@ -291,13 +314,13 @@ void get_command(Client *client, HashTable *db, HashTable *expires,
     return;
   }
 
-  char *value = (char *)o->data;
-  size_t val_len = strlen(value);
+  Bytes *value = (Bytes *)o->data;
 
   char header[64];
-  int head_len = snprintf(header, sizeof(header), "$%zu\r\n", val_len);
+  int head_len =
+      snprintf(header, sizeof(header), "$%" PRIu32 "\r\n", value->length);
   append_to_output_buffer(ob, header, head_len);
-  append_to_output_buffer(ob, value, val_len);
+  append_to_output_buffer(ob, value->data, value->length);
   append_to_output_buffer(ob, "\r\n", 2);
 
   return;
@@ -305,7 +328,7 @@ void get_command(Client *client, HashTable *db, HashTable *expires,
 
 void del_command(Client *client, HashTable *db, HashTable *expires,
                  OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 2) {
@@ -316,11 +339,9 @@ void del_command(Client *client, HashTable *db, HashTable *expires,
   int deleted_count = 0;
 
   for (int i = 1; i < arg_count; i++) {
-    char *key = arg_values[i];
-    r_obj *o = hash_table_get(db, key);
-
-    if (o != NULL) {
-      hash_table_del(db, key);
+    Bytes *key = arg_values[i];
+    if (hash_table_del(db, key) == 1) {
+      hash_table_del(expires, key);
       deleted_count++;
     }
   }
@@ -333,11 +354,17 @@ void del_command(Client *client, HashTable *db, HashTable *expires,
 
 void ttl_command(Client *client, HashTable *db, HashTable *expires,
                  OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 2) {
     append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+  if (o == NULL) {
+    append_to_output_buffer(ob, ":-2\r\n", 5);
     return;
   }
 
@@ -357,7 +384,7 @@ void ttl_command(Client *client, HashTable *db, HashTable *expires,
 void lpush_command(Client *client, HashTable *db, HashTable *expires,
                    OutputBuffer *ob) {
 
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 3) {
@@ -383,18 +410,19 @@ void lpush_command(Client *client, HashTable *db, HashTable *expires,
   List *list = (List *)o->data;
 
   for (j = 2; j < arg_count; j++) {
-    list_ins_node_head(list, strdup(arg_values[j]));
+    list_ins_node_head(
+        list, create_string_object(arg_values[j]->data, arg_values[j]->length));
   }
 
   char resp[64];
-  int resp_len = snprintf(resp, sizeof(resp), ":%lu\r\n", list->size);
+  int resp_len = snprintf(resp, sizeof(resp), ":%zu\r\n", list->size);
   append_to_output_buffer(ob, resp, resp_len);
   return;
 }
 
 void llen_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count != 2) {
@@ -417,14 +445,14 @@ void llen_command(Client *client, HashTable *db, HashTable *expires,
 
   List *list = (List *)o->data;
   char resp[64];
-  int resp_len = snprintf(resp, sizeof(resp), ":%lu\r\n", list->size);
+  int resp_len = snprintf(resp, sizeof(resp), ":%zu\r\n", list->size);
   append_to_output_buffer(ob, resp, resp_len);
   return;
 }
 
 void lindex_command(Client *client, HashTable *db, HashTable *expires,
                     OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count != 3) {
@@ -447,7 +475,7 @@ void lindex_command(Client *client, HashTable *db, HashTable *expires,
   }
 
   List *list = (List *)o->data;
-  int index = atoi(arg_values[2]);
+  int index = atoi(arg_values[2]->data);
 
   if (index < 0 || index >= list->size) {
     append_to_output_buffer(ob, "_\r\n", 3);
@@ -462,11 +490,14 @@ void lindex_command(Client *client, HashTable *db, HashTable *expires,
     index--;
   }
 
-  char *value = (char *)member->value;
-  size_t val_len = strlen(value);
+  r_obj *member_o = (r_obj *)member->value;
+  Bytes *member_bytes = (Bytes *)member_o->data;
+
+  char *value = member_bytes->data;
+  uint32_t val_len = member_bytes->length;
 
   char header[64];
-  int head_len = snprintf(header, sizeof(header), "$%zu\r\n", val_len);
+  int head_len = snprintf(header, sizeof(header), "$%" PRIu32 "\r\n", val_len);
   append_to_output_buffer(ob, header, head_len);
   append_to_output_buffer(ob, value, val_len);
   append_to_output_buffer(ob, "\r\n", 2);
@@ -475,7 +506,7 @@ void lindex_command(Client *client, HashTable *db, HashTable *expires,
 
 void lrange_command(Client *client, HashTable *db, HashTable *expires,
                     OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count != 4) {
@@ -499,10 +530,17 @@ void lrange_command(Client *client, HashTable *db, HashTable *expires,
 
   List *list = (List *)o->data;
 
-  int start = atoi(arg_values[2]);
-  int stop = atoi(arg_values[3]);
+  int64_t start;
+  int64_t stop;
 
-  long llen = list->size;
+  if (try_parse_int64(arg_values[2]->data, &start) != 1 ||
+      try_parse_int64(arg_values[3]->data, &stop) != 1) {
+    append_to_output_buffer(ob, "-value is not an integer or out of range\r\n",
+                            42);
+    return;
+  }
+
+  size_t llen = list->size;
 
   if (start < 0)
     start = llen + start;
@@ -520,7 +558,7 @@ void lrange_command(Client *client, HashTable *db, HashTable *expires,
 
   if (stop >= llen)
     stop = llen - 1;
-  long range_len = stop - start + 1;
+  size_t range_len = stop - start + 1;
 
   ListNode *node;
 
@@ -534,12 +572,15 @@ void lrange_command(Client *client, HashTable *db, HashTable *expires,
   append_to_output_buffer(ob, header, header_len);
 
   while (node && range_len > 0) {
-    char *value = (char *)node->value;
-    size_t val_len = strlen(value);
+    r_obj *member_o = (r_obj *)node->value;
+    Bytes *member_bytes = (Bytes *)member_o->data;
+
+    char *value = member_bytes->data;
+    uint32_t val_len = member_bytes->length;
 
     char bulk_header[64];
     int bh_len =
-        snprintf(bulk_header, sizeof(bulk_header), "$%zu\r\n", val_len);
+        snprintf(bulk_header, sizeof(bulk_header), "$%" PRIu32 "\r\n", val_len);
 
     append_to_output_buffer(ob, bulk_header, bh_len);
     append_to_output_buffer(ob, value, val_len);
@@ -553,7 +594,7 @@ void lrange_command(Client *client, HashTable *db, HashTable *expires,
 
 void lmove_command(Client *client, HashTable *db, HashTable *expires,
                    OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count != 5) {
@@ -563,7 +604,9 @@ void lmove_command(Client *client, HashTable *db, HashTable *expires,
 
   int flags = 0;
 
-  char *src_option = arg_values[3];
+  Bytes *src = arg_values[3];
+  char *src_option = src->data;
+
   if (strcasecmp(src_option, "LEFT") == 0)
     flags |= LMOVE_SRC_LEFT;
   else if (strcasecmp(src_option, "RIGHT") == 0)
@@ -573,7 +616,9 @@ void lmove_command(Client *client, HashTable *db, HashTable *expires,
     return;
   }
 
-  char *dest_option = arg_values[4];
+  Bytes *dest = arg_values[4];
+  char *dest_option = dest->data;
+
   if (strcasecmp(dest_option, "LEFT") == 0)
     flags |= LMOVE_DEST_LEFT;
   else if (strcasecmp(dest_option, "RIGHT") == 0)
@@ -611,12 +656,12 @@ void lmove_command(Client *client, HashTable *db, HashTable *expires,
   List *src_list = (List *)src_o->data;
   List *dest_list = (List *)dest_o->data;
 
-  char *value;
+  r_obj *value;
 
   if (flags & LMOVE_SRC_LEFT)
-    value = (char *)list_pop_head(src_list);
+    value = list_pop_head(src_list);
   else if (flags & LMOVE_SRC_RIGHT)
-    value = (char *)list_pop_tail(src_list);
+    value = list_pop_tail(src_list);
 
   if (!value) {
     append_to_output_buffer(ob, "$-1\r\n", 5);
@@ -624,15 +669,23 @@ void lmove_command(Client *client, HashTable *db, HashTable *expires,
   }
 
   if (flags & LMOVE_DEST_LEFT)
-    list_ins_node_head(dest_list, (const char *)value);
+    list_ins_node_head(dest_list, value);
   else if (flags & LMOVE_DEST_RIGHT)
-    list_ins_node_tail(dest_list, (const char *)value);
+    list_ins_node_tail(dest_list, value);
 
-  unsigned long val_len = strlen(value);
+  if (src_list->size == 0) {
+    hash_table_del(db, arg_values[1]);
+    hash_table_del(expires, arg_values[1]);
+  }
+
+  Bytes *value_bytes = (Bytes *)value->data;
+
+  uint32_t val_len = value_bytes->length;
   char bulk_header[64];
-  int bh_len = snprintf(bulk_header, sizeof(bulk_header), "$%ld\r\n", val_len);
+  int bh_len =
+      snprintf(bulk_header, sizeof(bulk_header), "$%" PRIu32 "\r\n", val_len);
   append_to_output_buffer(ob, bulk_header, bh_len);
-  append_to_output_buffer(ob, value, val_len);
+  append_to_output_buffer(ob, value_bytes->data, val_len);
   append_to_output_buffer(ob, "\r\n", 2);
 
   return;
@@ -640,7 +693,7 @@ void lmove_command(Client *client, HashTable *db, HashTable *expires,
 
 void ltrim_command(Client *client, HashTable *db, HashTable *expires,
                    OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count != 4) {
@@ -664,10 +717,17 @@ void ltrim_command(Client *client, HashTable *db, HashTable *expires,
 
   List *list = (List *)o->data;
 
-  int start = atoi(arg_values[2]);
-  int stop = atoi(arg_values[3]);
+  int64_t start;
+  int64_t stop;
 
-  long llen = list->size;
+  if (try_parse_int64(arg_values[2]->data, &start) != 1 ||
+      try_parse_int64(arg_values[3]->data, &stop) != 1) {
+    append_to_output_buffer(ob, "-value is not an integer or out of range\r\n",
+                            42);
+    return;
+  }
+
+  size_t llen = list->size;
 
   if (start < 0)
     start = llen + start;
@@ -685,13 +745,17 @@ void ltrim_command(Client *client, HashTable *db, HashTable *expires,
   if (stop >= llen)
     stop = llen - 1;
 
-  for (int i = 0; i < start; i++)
-    list_pop_head(list);
+  for (int64_t i = 0; i < start; i++) {
+    r_obj *value = list_pop_head(list);
+    free_object(value);
+  }
 
   stop = stop - start;
 
-  while (list->size > stop + 1)
-    list_pop_tail(list);
+  while (list->size > stop + 1) {
+    r_obj *value = list_pop_tail(list);
+    free_object(value);
+  }
 
   append_to_output_buffer(ob, "+OK\r\n", 5);
   return;
@@ -700,7 +764,7 @@ void ltrim_command(Client *client, HashTable *db, HashTable *expires,
 void rpush_command(Client *client, HashTable *db, HashTable *expires,
                    OutputBuffer *ob) {
 
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 3) {
@@ -725,18 +789,19 @@ void rpush_command(Client *client, HashTable *db, HashTable *expires,
   List *list = (List *)o->data;
 
   for (j = 2; j < arg_count; j++) {
-    list_ins_node_tail(list, strdup(arg_values[j]));
+    list_ins_node_tail(
+        list, create_string_object(arg_values[j]->data, arg_values[j]->length));
   }
 
   char resp[64];
-  int resp_len = snprintf(resp, sizeof(resp), ":%lu\r\n", list->size);
+  int resp_len = snprintf(resp, sizeof(resp), ":%zu\r\n", list->size);
   append_to_output_buffer(ob, resp, resp_len);
   return;
 }
 
 void rpop_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 2) {
@@ -759,41 +824,52 @@ void rpop_command(Client *client, HashTable *db, HashTable *expires,
   List *list = (List *)o->data;
 
   if (arg_count == 3) {
-    int count = atoi(arg_values[2]);
+    int64_t count;
+    if (try_parse_int64(arg_values[2]->data, &count) == 0) {
+      append_to_output_buffer(
+          ob, "-value is out of range, must be positive\r\n", 42);
+      return;
+    }
 
     if (count > list->size) {
       count = list->size;
     }
 
     char header[64];
-    int header_len = snprintf(header, sizeof(header), "*%d\r\n", count);
+    int header_len =
+        snprintf(header, sizeof(header), "*%" PRId64 "\r\n", count);
     append_to_output_buffer(ob, header, header_len);
 
-    for (int i = 0; i < count; i++) {
-      char *value = (char *)list_pop_tail(list);
-      unsigned long value_len = strlen(value);
+    for (int64_t i = 0; i < count; i++) {
+      r_obj *value = list_pop_tail(list);
+      Bytes *value_bytes = (Bytes *)value->data;
+      uint32_t val_len = value_bytes->length;
+
       char bulk_header[64];
-      int bh_len =
-          snprintf(bulk_header, sizeof(bulk_header), "$%lu\r\n", value_len);
+      int bh_len = snprintf(bulk_header, sizeof(bulk_header),
+                            "$%" PRIu32 "\r\n", val_len);
       append_to_output_buffer(ob, bulk_header, bh_len);
-      append_to_output_buffer(ob, value, value_len);
+      append_to_output_buffer(ob, value_bytes->data, val_len);
       append_to_output_buffer(ob, "\r\n", 2);
 
-      free(value);
+      free_object(value);
     }
   } else {
-    char *value = (char *)list_pop_tail(list);
+    r_obj *value = list_pop_tail(list);
 
     if (value) {
-      unsigned long value_len = strlen(value);
+      Bytes *value_bytes = (Bytes *)value->data;
+      uint32_t val_len = value_bytes->length;
 
       char bulk_header[64];
-      int bh_len =
-          snprintf(bulk_header, sizeof(bulk_header), "$%lu\r\n", value_len);
+      int bh_len = snprintf(bulk_header, sizeof(bulk_header),
+                            "$%" PRIu32 "\r\n", val_len);
 
       append_to_output_buffer(ob, bulk_header, bh_len);
-      append_to_output_buffer(ob, value, value_len);
+      append_to_output_buffer(ob, value_bytes->data, val_len);
       append_to_output_buffer(ob, "\r\n", 2);
+
+      free_object(value);
     } else {
       append_to_output_buffer(ob, "$-1\r\n", 5);
       return;
@@ -801,6 +877,7 @@ void rpop_command(Client *client, HashTable *db, HashTable *expires,
   }
   if (list->size == 0) {
     hash_table_del(db, arg_values[1]);
+    hash_table_del(expires, arg_values[1]);
   }
 
   return;
@@ -808,7 +885,7 @@ void rpop_command(Client *client, HashTable *db, HashTable *expires,
 
 void lpop_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 2) {
@@ -831,41 +908,52 @@ void lpop_command(Client *client, HashTable *db, HashTable *expires,
   List *list = (List *)o->data;
 
   if (arg_count == 3) {
-    int count = atoi(arg_values[2]);
+    int64_t count;
+    if (try_parse_int64(arg_values[2]->data, &count) == 0) {
+      append_to_output_buffer(
+          ob, "-value is out of range, must be positive\r\n", 42);
+      return;
+    }
 
     if (count > list->size) {
       count = list->size;
     }
 
     char header[64];
-    int header_len = snprintf(header, sizeof(header), "*%d\r\n", count);
+    int header_len =
+        snprintf(header, sizeof(header), "*%" PRId64 "\r\n", count);
     append_to_output_buffer(ob, header, header_len);
 
-    for (int i = 0; i < count; i++) {
-      char *value = (char *)list_pop_head(list);
-      unsigned long value_len = strlen(value);
+    for (int64_t i = 0; i < count; i++) {
+      r_obj *value = list_pop_head(list);
+      Bytes *value_bytes = (Bytes *)value->data;
+      uint32_t val_len = value_bytes->length;
+
       char bulk_header[64];
-      int bh_len =
-          snprintf(bulk_header, sizeof(bulk_header), "$%lu\r\n", value_len);
+      int bh_len = snprintf(bulk_header, sizeof(bulk_header),
+                            "$%" PRIu32 "\r\n", val_len);
       append_to_output_buffer(ob, bulk_header, bh_len);
-      append_to_output_buffer(ob, value, value_len);
+      append_to_output_buffer(ob, value_bytes->data, val_len);
       append_to_output_buffer(ob, "\r\n", 2);
 
-      free(value);
+      free_object(value);
     }
   } else {
-    char *value = (char *)list_pop_head(list);
+    r_obj *value = list_pop_head(list);
 
     if (value) {
-      unsigned long value_len = strlen(value);
+      Bytes *value_bytes = (Bytes *)value->data;
+      uint32_t val_len = value_bytes->length;
 
       char bulk_header[64];
-      int bh_len =
-          snprintf(bulk_header, sizeof(bulk_header), "$%lu\r\n", value_len);
+      int bh_len = snprintf(bulk_header, sizeof(bulk_header),
+                            "$%" PRIu32 "\r\n", val_len);
 
       append_to_output_buffer(ob, bulk_header, bh_len);
-      append_to_output_buffer(ob, value, value_len);
+      append_to_output_buffer(ob, value_bytes->data, val_len);
       append_to_output_buffer(ob, "\r\n", 2);
+
+      free_object(value);
     } else {
       append_to_output_buffer(ob, "$-1\r\n", 5);
       return;
@@ -873,6 +961,7 @@ void lpop_command(Client *client, HashTable *db, HashTable *expires,
   }
   if (list->size == 0) {
     hash_table_del(db, arg_values[1]);
+    hash_table_del(expires, arg_values[1]);
   }
 
   return;
@@ -880,7 +969,7 @@ void lpop_command(Client *client, HashTable *db, HashTable *expires,
 
 void scard_command(Client *client, HashTable *db, HashTable *expires,
                    OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count != 2) {
@@ -912,7 +1001,7 @@ void scard_command(Client *client, HashTable *db, HashTable *expires,
 
 void sadd_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 3) {
@@ -939,11 +1028,8 @@ void sadd_command(Client *client, HashTable *db, HashTable *expires,
   Set *set = (Set *)o->data;
 
   for (j = 2; j < arg_count; j++) {
-    char *member = strdup(arg_values[j]);
-    if (set_add(set, member) == 1) {
+    if (set_add(set, arg_values[j]) == 1) {
       count++;
-    } else {
-      free(member);
     }
   }
 
@@ -955,7 +1041,7 @@ void sadd_command(Client *client, HashTable *db, HashTable *expires,
 
 void srem_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 3) {
@@ -986,6 +1072,11 @@ void srem_command(Client *client, HashTable *db, HashTable *expires,
       count++;
   }
 
+  if (set->count == 0) {
+    hash_table_del(db, arg_values[1]);
+    hash_table_del(expires, arg_values[1]);
+  }
+
   char resp[64];
   int resp_len = snprintf(resp, sizeof(resp), ":%d\r\n", count);
   append_to_output_buffer(ob, resp, resp_len);
@@ -994,7 +1085,7 @@ void srem_command(Client *client, HashTable *db, HashTable *expires,
 
 void sinter_command(Client *client, HashTable *db, HashTable *expires,
                     OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 2) {
@@ -1044,7 +1135,7 @@ void sinter_command(Client *client, HashTable *db, HashTable *expires,
     }
   }
 
-  int count = 0;
+  size_t count = 0;
 
   for (size_t i = 0; i <= small->size; i++) {
     Node *entry = small->buckets[i];
@@ -1062,14 +1153,13 @@ void sinter_command(Client *client, HashTable *db, HashTable *expires,
       }
 
       if (in_all) {
-        char *val = entry->key;
-        size_t val_len = strlen(val);
-
-        printf("%s valoare\n", val);
+        Bytes *val_bytes = entry->key;
+        char *val = val_bytes->data;
+        uint32_t val_len = val_bytes->length;
 
         char bulk_header[64];
-        int bh_len =
-            snprintf(bulk_header, sizeof(bulk_header), "$%zu\r\n", val_len);
+        int bh_len = snprintf(bulk_header, sizeof(bulk_header),
+                              "$%" PRIu32 "\r\n", val_len);
 
         append_to_output_buffer(ob, bulk_header, bh_len);
         append_to_output_buffer(ob, val, val_len);
@@ -1085,14 +1175,14 @@ void sinter_command(Client *client, HashTable *db, HashTable *expires,
   free(sets);
 
   char header[64];
-  int header_len = snprintf(header, sizeof(header), "~%d\r\n", count);
+  int header_len = snprintf(header, sizeof(header), "~%zu\r\n", count);
   write(ob->fd, header, header_len);
   return;
 }
 
 void sismember_command(Client *client, HashTable *db, HashTable *expires,
                        OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 3) {
@@ -1123,7 +1213,7 @@ void sismember_command(Client *client, HashTable *db, HashTable *expires,
 
 void smembers_command(Client *client, HashTable *db, HashTable *expires,
                       OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count != 2) {
@@ -1156,12 +1246,14 @@ void smembers_command(Client *client, HashTable *db, HashTable *expires,
   for (j = 0; j < set->size; j++) {
     Node *entry = set->buckets[j];
     while (entry) {
-      char *val = entry->key;
-      size_t val_len = strlen(val);
+      Bytes *value_bytes = entry->key;
+
+      char *val = value_bytes->data;
+      uint32_t val_len = value_bytes->length;
 
       char bulk_header[64];
-      int bh_len =
-          snprintf(bulk_header, sizeof(bulk_header), "$%zu\r\n", val_len);
+      int bh_len = snprintf(bulk_header, sizeof(bulk_header),
+                            "$%" PRIu32 "\r\n", val_len);
 
       append_to_output_buffer(ob, bulk_header, bh_len);
       append_to_output_buffer(ob, val, val_len);
@@ -1177,7 +1269,7 @@ void smembers_command(Client *client, HashTable *db, HashTable *expires,
 void hset_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob) {
 
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 4 || arg_count % 2 != 0) {
@@ -1202,9 +1294,10 @@ void hset_command(Client *client, HashTable *db, HashTable *expires,
   int count = 0;
   int j;
   for (j = 2; j < arg_count; j++) {
-    char *field = arg_values[j];
-    char *value = arg_values[++j];
-    hash_table_set((HashTable *)o->data, field, create_string_object(value));
+    Bytes *field = arg_values[j];
+    Bytes *value = arg_values[++j];
+    hash_table_set((HashTable *)o->data, field,
+                   create_string_object(value->data, value->length));
     count++;
   }
 
@@ -1217,7 +1310,7 @@ void hset_command(Client *client, HashTable *db, HashTable *expires,
 void hget_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob) {
 
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count != 3) {
@@ -1245,11 +1338,13 @@ void hget_command(Client *client, HashTable *db, HashTable *expires,
     return;
   }
 
-  char *val = (char *)hash_o->data;
-  size_t val_len = strlen(val);
+  Bytes *value_bytes = (Bytes *)hash_o->data;
+  uint32_t val_len = value_bytes->length;
+  char *val = value_bytes->data;
 
   char bulk_header[64];
-  int bh_len = snprintf(bulk_header, sizeof(bulk_header), "$%zu\r\n", val_len);
+  int bh_len =
+      snprintf(bulk_header, sizeof(bulk_header), "$%" PRIu32 "\r\n", val_len);
 
   append_to_output_buffer(ob, bulk_header, bh_len);
   append_to_output_buffer(ob, val, val_len);
@@ -1261,7 +1356,7 @@ void hget_command(Client *client, HashTable *db, HashTable *expires,
 void hmget_command(Client *client, HashTable *db, HashTable *expires,
                    OutputBuffer *ob) {
 
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 3) {
@@ -1289,7 +1384,7 @@ void hmget_command(Client *client, HashTable *db, HashTable *expires,
   append_to_output_buffer(ob, header, header_len);
 
   for (int j = 2; j < arg_count; j++) {
-    char *field = arg_values[j];
+    Bytes *field = arg_values[j];
 
     r_obj *field_o = hash_table_get(hash, field);
 
@@ -1298,12 +1393,14 @@ void hmget_command(Client *client, HashTable *db, HashTable *expires,
       continue;
     }
 
-    char *val = (char *)field_o->data;
-    size_t val_len = strlen(val);
+    Bytes *value_bytes = (Bytes *)field_o->data;
+
+    uint32_t val_len = value_bytes->length;
+    char *val = value_bytes->data;
 
     char bulk_header[64];
     int bh_len =
-        snprintf(bulk_header, sizeof(bulk_header), "$%zu\r\n", val_len);
+        snprintf(bulk_header, sizeof(bulk_header), "$%" PRIu32 "\r\n", val_len);
 
     append_to_output_buffer(ob, bulk_header, bh_len);
     append_to_output_buffer(ob, val, val_len);
@@ -1315,7 +1412,7 @@ void hmget_command(Client *client, HashTable *db, HashTable *expires,
 
 void hincrby_command(Client *client, HashTable *db, HashTable *expires,
                      OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count != 4) {
@@ -1324,9 +1421,9 @@ void hincrby_command(Client *client, HashTable *db, HashTable *expires,
   }
 
   int64_t increment = 0;
-  if (try_parse_int64(arg_values[3], &increment) == 0) {
-    char *msg = "-value is not an integer or out of range\r\n";
-    append_to_output_buffer(ob, msg, strlen(msg));
+  if (try_parse_int64(arg_values[3]->data, &increment) == 0) {
+    append_to_output_buffer(
+        ob, "-ERR value is not an integer or out of range\r\n", 44);
     return;
   }
 
@@ -1347,44 +1444,33 @@ void hincrby_command(Client *client, HashTable *db, HashTable *expires,
   HashTable *hash = (HashTable *)o->data;
 
   r_obj *field_o = hash_table_get(hash, arg_values[2]);
-  if (field_o == NULL) {
-    char num_str[64];
-    int num_len = snprintf(num_str, sizeof(num_str), "%" PRId64, increment);
+  int64_t current_val = 0;
 
-    field_o = create_string_object(num_str);
-    hash_table_set(hash, arg_values[2], field_o);
+  if (field_o != NULL) {
+    Bytes *bytes = (Bytes *)field_o->data;
 
-    char resp[64];
-    int resp_len = snprintf(resp, sizeof(resp), ":%s\r\n", num_str);
-    append_to_output_buffer(ob, resp, resp_len);
+    if (try_parse_int64(bytes->data, &current_val) == 0) {
+      append_to_output_buffer(ob, "-ERR hash value is not an integer\r\n", 35);
+      return;
+    }
+  }
+
+  if ((increment > 0 && current_val > INT64_MAX - increment) ||
+      (increment < 0 && current_val < INT64_MIN - increment)) {
+    append_to_output_buffer(
+        ob, "-ERR increment or decrement would overflow\r\n", 44);
     return;
   }
 
-  int64_t current_score = 0;
-  if (try_parse_int64((char *)field_o->data, &current_score) == 0) {
-    char *msg = "-hash value is not an integer\r\n";
-    append_to_output_buffer(ob, msg, strlen(msg));
-    return;
-  }
-
-  if ((increment > 0 && current_score > INT64_MAX - increment) ||
-      (increment < 0 && current_score < INT64_MIN - increment)) {
-    char *msg = "-ERR increment or decrement would overflow\r\n";
-    append_to_output_buffer(ob, msg, strlen(msg));
-    return;
-  }
-
-  current_score += increment;
+  int64_t new_val = current_val + increment;
 
   char num_str[64];
-  int num_len = snprintf(num_str, sizeof(num_str), "%" PRId64, current_score);
-
-  free(field_o->data);
-  field_o->data = strdup(num_str);
-  hash_table_set(hash, arg_values[2], field_o);
+  int len = snprintf(num_str, sizeof(num_str), "%" PRId64, new_val);
+  r_obj *new_obj = create_string_object(num_str, len);
+  hash_table_set(hash, arg_values[2], new_obj);
 
   char resp[64];
-  int resp_len = snprintf(resp, sizeof(resp), ":%s\r\n", num_str);
+  int resp_len = snprintf(resp, sizeof(resp), ":%" PRId64 "\r\n", new_val);
   append_to_output_buffer(ob, resp, resp_len);
   return;
 }
@@ -1392,7 +1478,7 @@ void hincrby_command(Client *client, HashTable *db, HashTable *expires,
 void zadd_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob) {
 
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 4) {
@@ -1405,7 +1491,8 @@ void zadd_command(Client *client, HashTable *db, HashTable *expires,
 
   int j;
   for (j = 2; j < arg_count; j++) {
-    char *option = arg_values[j];
+    Bytes *option_bytes = arg_values[j];
+    char *option = option_bytes->data;
 
     if (strcasecmp(option, "NX") == 0) {
       flags |= ZADD_SET_NX;
@@ -1482,15 +1569,16 @@ void zadd_command(Client *client, HashTable *db, HashTable *expires,
   int processed = 0;
 
   for (int i = j; i < arg_count; i++) {
-    double score = atof(arg_values[i]);
-    char *member = arg_values[++i];
+    double score = atof(arg_values[i]->data);
+
+    Bytes *member = arg_values[++i];
 
     if (flags & ZADD_SET_INCR) {
       r_obj *score_o = hash_table_get(zs->dict, member);
       double current_score = 0.0;
 
       if (score_o != NULL) {
-        current_score = *(double *)o->data;
+        current_score = *(double *)score_o->data;
       } else {
         if (xx) {
           append_to_output_buffer(ob, "_\r\n", 3);
@@ -1553,7 +1641,7 @@ void zadd_command(Client *client, HashTable *db, HashTable *expires,
 
 void zrange_command(Client *client, HashTable *db, HashTable *expires,
                     OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 4) {
@@ -1562,30 +1650,36 @@ void zrange_command(Client *client, HashTable *db, HashTable *expires,
   }
 
   int flags = ZRANGE_SET_NO_FLAGS;
-  int limit_offset = 0;
-  int limit_count = -1; // -1 implies infinite
+  int64_t limit_offset = 0;
+  int64_t limit_count = -1; // -1 implies infinite
   int with_scores = 0;
   int reverse = 0;
 
   int j;
   for (j = 4; j < arg_count; j++) {
-    if (!strcasecmp(arg_values[j], "BYSCORE"))
+    char *option = arg_values[j]->data;
+
+    if (strcasecmp(option, "BYSCORE") == 0)
       flags |= ZRANGE_SET_BYSCORE;
-    else if (!strcasecmp(arg_values[j], "BYLEX"))
+    else if (strcasecmp(option, "BYLEX") == 0)
       flags |= ZRANGE_SET_BYLEX;
-    else if (!strcasecmp(arg_values[j], "REV")) {
+    else if (strcasecmp(option, "REV") == 0) {
       flags |= ZRANGE_SET_REV;
       reverse = 1;
-    } else if (!strcasecmp(arg_values[j], "WITHSCORES"))
+    } else if (strcasecmp(option, "WITHSCORES") == 0)
       with_scores = 1;
-    else if (!strcasecmp(arg_values[j], "LIMIT")) {
+    else if (strcasecmp(option, "LIMIT") == 0) {
       if ((j + 2) >= arg_count) {
         append_to_output_buffer(ob, "-ERR syntax error\r\n", 19);
         return;
       }
       flags |= ZRANGE_SET_LIMIT;
-      limit_offset = atoi(arg_values[j + 1]);
-      limit_count = atoi(arg_values[j + 2]);
+      if (try_parse_int64(arg_values[j + 1]->data, &limit_offset) == 0 ||
+          try_parse_int64(arg_values[j + 2]->data, &limit_count) == 0) {
+        append_to_output_buffer(
+            ob, "-value is not an integer or out of range\r\n", 42);
+        return;
+      }
       j += 2;
     } else {
       append_to_output_buffer(ob, "-ERR syntax error\r\n", 19);
@@ -1598,15 +1692,15 @@ void zrange_command(Client *client, HashTable *db, HashTable *expires,
     return;
   }
   if ((flags & ZRANGE_SET_BYLEX) && with_scores) {
-    char *msg = "-ERR syntax error, WITHSCORES not supported with BYLEX\r\n";
-    append_to_output_buffer(ob, msg, strlen(msg));
+    append_to_output_buffer(
+        ob, "-ERR syntax error, WITHSCORES not supported with BYLEX\r\n;", 56);
     return;
   }
   if ((flags & ZRANGE_SET_LIMIT) && !(flags & ZRANGE_SET_BYSCORE) &&
       !(flags & ZRANGE_SET_BYLEX)) {
-    char *msg =
-        "-ERR syntax error, LIMIT only supported with BYSCORE or BYLEX\r\n";
-    append_to_output_buffer(ob, msg, strlen(msg));
+    append_to_output_buffer(
+        ob, "-ERR syntax error, LIMIT only supported with BYSCORE or BYLEX\r\n",
+        63);
     return;
   }
 
@@ -1618,9 +1712,11 @@ void zrange_command(Client *client, HashTable *db, HashTable *expires,
   }
 
   if (o->type != ZSET) {
-    char *err = "-WRONGTYPE Operation against a key holding the wrong kind of "
-                "value\r\n";
-    append_to_output_buffer(ob, err, strlen(err));
+
+    append_to_output_buffer(ob,
+                            "-WRONGTYPE Operation against a key holding the "
+                            "wrong kind of value\r\n",
+                            68);
     return;
   }
 
@@ -1630,8 +1726,8 @@ void zrange_command(Client *client, HashTable *db, HashTable *expires,
   int count = 0;
 
   if (flags & ZRANGE_SET_BYSCORE) {
-    double start = atof(arg_values[2]);
-    double stop = atof(arg_values[3]);
+    double start = atof(arg_values[2]->data);
+    double stop = atof(arg_values[3]->data);
 
     if (reverse)
       node = zsl_last_in_range(zsl, stop);
@@ -1663,44 +1759,86 @@ void zrange_command(Client *client, HashTable *db, HashTable *expires,
         limit_count--;
     }
   } else if (flags & ZRANGE_SET_BYLEX) {
-    int min_inclusive = (arg_values[2][0] == '[');
-    char *min_str = arg_values[2] + 1;
 
-    int max_inclusive = (arg_values[3][0] == '[');
-    char *max_str = arg_values[3] + 1;
+    Bytes *min_arg = arg_values[2];
+    Bytes *max_arg = arg_values[3];
 
-    if (reverse)
-      node = zsl_last_in_lex_range(zsl, max_str, max_inclusive);
-    else
-      node = zsl_first_in_lex_range(zsl, min_str, min_inclusive);
+    if (min_arg->length == 1 && min_arg->data[0] == '-') {
+      node = zsl->head->level[0].forward;
 
-    while (node && limit_offset > 0) {
-      node = zsl_next_node(node, reverse);
-      limit_offset--;
+    } else {
+      if (min_arg->length < 1) {
+        append_to_output_buffer(
+            ob, "-ERR min or max not valid string range item\r\n", 46);
+        return;
+      }
+
+      int inclusive = (min_arg->data[0] == '[');
+      if (!inclusive && min_arg->data[0] != '(') {
+        append_to_output_buffer(
+            ob, "-ERR min or max not valid string range item\r\n", 46);
+        return;
+      }
+
+      Bytes min_parsed;
+
+      min_parsed.data = min_arg->data + 1;
+      min_parsed.length = min_arg->length - 1;
+
+      if (reverse)
+        node = zsl_last_in_lex_range(zsl, &min_parsed, inclusive);
+      else
+        node = zsl_first_in_lex_range(zsl, &min_parsed, inclusive);
     }
 
-    while (node && (limit_count != 0)) {
+    if (reverse && (max_arg->length == 1 && max_arg->data[0] == '+')) {
+      node = zsl->tail;
+    }
+
+    while (node && limit_count > 0) {
       if (reverse) {
-        int cmp = strcmp(node->element, min_str);
-        if (min_inclusive ? cmp < 0 : cmp <= 0)
-          break;
+        if (!(min_arg->length == 1 && min_arg->data[0] == '-')) {
+          Bytes min_val;
+          min_val.data = min_arg->data + 1;
+          min_val.length = min_arg->length - 1;
+          int inclusive = (min_arg->data[0] == '[');
+
+          int cmp = bytes_compare(node->element, &min_val);
+
+          if (inclusive ? (cmp < 0) : (cmp <= 0))
+            break;
+        }
       } else {
-        int cmp = strcmp(node->element, max_str);
-        if (max_inclusive ? cmp > 0 : cmp >= 0)
-          break;
+        if (!(max_arg->length == 1 && max_arg->data[0] == '+')) {
+          Bytes max_val;
+          max_val.data = max_arg->data + 1;
+          max_val.length = max_arg->length - 1;
+          int inclusive = (max_arg->data[0] == '[');
+
+          int cmp = bytes_compare(node->element, &max_val);
+
+          if (inclusive ? (cmp > 0) : (cmp >= 0))
+            break;
+        }
       }
 
       zrange_emit_node(ob, node, 0);
-      count++;
-
       node = zsl_next_node(node, reverse);
-      if (limit_count > 0)
-        limit_count--;
+      limit_count--;
     }
+
   } else {
-    long start = atoi(arg_values[2]);
-    long stop = atoi(arg_values[3]);
-    long llen = zsl->length;
+
+    int64_t start;
+    int64_t stop;
+
+    if (try_parse_int64(arg_values[2]->data, &start) == 0 ||
+        try_parse_int64(arg_values[3]->data, &stop) == 0) {
+      append_to_output_buffer(
+          ob, "-value is not an integer or out of range\r\n", 42);
+    }
+
+    size_t llen = zsl->length;
 
     if (start < 0)
       start = llen + start;
@@ -1741,7 +1879,7 @@ void zrange_command(Client *client, HashTable *db, HashTable *expires,
 
 void zscore_command(Client *client, HashTable *db, HashTable *expires,
                     OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 3) {
@@ -1777,7 +1915,7 @@ void zscore_command(Client *client, HashTable *db, HashTable *expires,
 
 void zrank_command(Client *client, HashTable *db, HashTable *expires,
                    OutputBuffer *ob) {
-  char **arg_values = client->arg_values;
+  Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
   if (arg_count < 3) {

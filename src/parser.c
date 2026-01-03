@@ -1,10 +1,13 @@
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 
 #include "../include/parser.h"
 
+
 // read until carriage return + new line
+
 int read_until_crlf(const char *buffer, int input_len, int *pos, char *out,
                     int max_out_len) {
 
@@ -45,7 +48,7 @@ int parse_resp_request(Client *client) {
   if (client->arg_values == NULL) {
     client->arg_values_cap = 4;
     if ((client->arg_values =
-             malloc(sizeof(char *) * client->arg_values_cap)) == NULL)
+             malloc(sizeof(Bytes *) * client->arg_values_cap)) == NULL)
       return -1;
   }
 
@@ -72,13 +75,15 @@ int parse_resp_request(Client *client) {
       if (client->arg_count > client->arg_values_cap) {
         client->arg_values_cap *= 2;
         client->arg_values = realloc(client->arg_values,
-                                     sizeof(char *) * client->arg_values_cap);
+                                     sizeof(Bytes *) * client->arg_values_cap);
       }
 
-      client->arg_values[client->arg_count] = malloc(token_len + 1);
-      memcpy(client->arg_values[client->arg_count], token_start, token_len);
-      client->arg_values[client->arg_count][token_len] = '\0';
-      client->arg_count++;
+      client->arg_values[client->arg_count++] =
+          create_bytes_object(token_start, (uint32_t)token_len);
+      // client->arg_values[client->arg_count] = malloc(token_len + 1);
+      // memcpy(client->arg_values[client->arg_count], token_start, token_len);
+      // client->arg_values[client->arg_count][token_len] = '\0';
+      // client->arg_count++;
     }
     return 1;
   }
@@ -95,7 +100,7 @@ int parse_resp_request(Client *client) {
   if (num_args > client->arg_values_cap) {
     client->arg_values_cap = num_args;
     client->arg_values =
-        realloc(client->arg_values, sizeof(char *) * client->arg_values_cap);
+        realloc(client->arg_values, sizeof(Bytes *) * client->arg_values_cap);
   }
 
   for (int i = 0; i < num_args; i++) {
@@ -111,13 +116,19 @@ int parse_resp_request(Client *client) {
       return 0;
 
     int arg_len = atoi(len_str);
+
+    if (arg_len < 0)
+      return -1;
+
     if (pos + arg_len + 2 > len)
       return 0;
-
-    client->arg_values[client->arg_count] = malloc(arg_len + 1);
-    memcpy(client->arg_values[client->arg_count], buffer + pos, arg_len);
-    client->arg_values[client->arg_count][arg_len] = '\0';
-    client->arg_count++;
+    //
+    // client->arg_values[client->arg_count] = malloc(arg_len + 1);
+    // memcpy(client->arg_values[client->arg_count], buffer + pos, arg_len);
+    // client->arg_values[client->arg_count][arg_len] = '\0';
+    // client->arg_count++;
+    client->arg_values[client->arg_count++] =
+        create_bytes_object(buffer + pos, (uint32_t)arg_len);
 
     pos += arg_len + 2;
   }

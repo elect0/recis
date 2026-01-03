@@ -1,25 +1,25 @@
+#include "../include/client.h"
 #include "../include/list.h"
-#include "../include/redis.h"
+#include "../include/recis.h"
 #include "../include/set.h"
 #include "../include/zset.h"
 #include "string.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-unsigned long hash(const char *key) {
+unsigned long hash(const Bytes *key) {
   unsigned int val = 0;
-  const char *ptr = key;
   unsigned int tmp;
 
-  while (*ptr != '\0') {
-    val = (val << 4) + (*ptr);
-
+  for (uint32_t i = 0; i < key->length; i++) {
+    val = (val << 4) + key->data[i];
     if ((tmp = (val & 0xf0000000))) {
       val = val ^ (tmp >> 24);
       val = val ^ tmp;
     }
-    ptr++;
   }
+
   return val;
 }
 
@@ -35,7 +35,7 @@ static void hash_table_resize(HashTable *hash_table) {
     while (node) {
       Node *next_node = node->next;
 
-      unsigned int new_index = hash((const char *)node->key) % new_size;
+      unsigned int new_index = hash(node->key) % new_size;
 
       node->next = new_buckets[new_index];
       new_buckets[new_index] = node;
@@ -83,13 +83,20 @@ HashTable *hash_table_create(size_t size) {
   return hash_table;
 }
 
-r_obj *create_string_object(const char *str) {
+r_obj *create_string_object(const char *str, uint32_t length) {
   r_obj *o;
   if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL) {
     return NULL;
   }
   o->type = STRING;
-  o->data = strdup(str);
+
+  Bytes *b = create_bytes_object(str, length);
+  if (b == NULL) {
+    free(o);
+    return NULL;
+  }
+
+  o->data = b;
 
   return o;
 }
@@ -119,7 +126,7 @@ r_obj *create_double_object(double value) {
   return o;
 }
 
-void hash_table_set(HashTable *hash_table, const char *key, r_obj *val) {
+void hash_table_set(HashTable *hash_table, Bytes *key, r_obj *val) {
 
   if (hash_table->count >= hash_table->size) {
     hash_table_resize(hash_table);
@@ -129,8 +136,10 @@ void hash_table_set(HashTable *hash_table, const char *key, r_obj *val) {
 
   Node *entry = hash_table->buckets[slot];
   while (entry) {
-    if (strcmp(entry->key, key) == 0) {
+    if (bytes_equal(key, entry->key) == 1) {
+      free_object(entry->value);
       entry->value = val;
+
       return;
     }
     entry = entry->next;
@@ -141,7 +150,7 @@ void hash_table_set(HashTable *hash_table, const char *key, r_obj *val) {
     return;
   }
 
-  new_node->key = strdup(key);
+  new_node->key = bytes_dup(key);
   new_node->value = val;
   new_node->next = hash_table->buckets[slot];
 
@@ -149,13 +158,13 @@ void hash_table_set(HashTable *hash_table, const char *key, r_obj *val) {
   hash_table->count++;
 }
 
-r_obj *hash_table_get(HashTable *hash_table, const char *key) {
+r_obj *hash_table_get(HashTable *hash_table, Bytes *key) {
 
   unsigned int slot = hash(key) % hash_table->size;
 
   Node *entry = hash_table->buckets[slot];
   while (entry) {
-    if (strcmp(entry->key, key) == 0) {
+    if (bytes_equal(key, entry->key) == 1) {
       return entry->value;
     }
     entry = entry->next;
@@ -171,8 +180,9 @@ void free_object(r_obj *o) {
 
   switch (o->type) {
   case STRING:
-    if (o->data)
-      free(o->data);
+    if (o->data) {
+      free_bytes_object((Bytes *)o->data);
+    }
     break;
   case INT:
     if (o->data)
@@ -188,18 +198,21 @@ void free_object(r_obj *o) {
   case SET:
     hash_table_destroy((Set *)o->data);
     break;
+  case HASH:
+    hash_table_destroy((HashTable *)o->data);
+    break;
   }
 
   free(o);
 }
 
-int hash_table_del(HashTable *hash_table, const char *key) {
+int hash_table_del(HashTable *hash_table, Bytes *key) {
   unsigned int slot = hash(key) % hash_table->size;
   Node *entry = hash_table->buckets[slot];
   Node *prev = NULL;
 
   while (entry) {
-    if (strcmp(entry->key, key) == 0) {
+    if (bytes_equal(entry->key, key) == 1) {
       if (prev == NULL) {
         hash_table->buckets[slot] = entry->next;
       } else {
@@ -208,7 +221,7 @@ int hash_table_del(HashTable *hash_table, const char *key) {
 
       free_object(entry->value);
 
-      free(entry->key);
+      free_bytes_object(entry->key);
       free(entry);
 
       hash_table->count--;
@@ -232,14 +245,12 @@ void hash_table_destroy(HashTable *hash_table) {
     while (entry) {
       Node *next = entry->next;
 
-      if (entry->key)
-        free(entry->key);
+      if (entry->key) {
+        free_bytes_object(entry->key);
+      }
 
       if (entry->value) {
-        r_obj *o = (r_obj *)entry->value;
-        if (o->data)
-          free(o->data);
-        free(o);
+        free_object(entry->value);
       }
 
       free(entry);

@@ -1,7 +1,9 @@
-#ifndef HASH_TABLE_H
-#define HASH_TABLE_H
+#ifndef RECIS_H
+#define RECIS_H
 
+#include "parser.h"
 #include <stddef.h>
+#include <stdint.h>
 
 // Bitmasks for SET command
 #define OBJ_SET_NO_FLAGS 0
@@ -30,28 +32,9 @@ typedef struct RObj {
   void *data;
 } r_obj;
 
-typedef struct Node_ {
-  char *key;
-  r_obj *value;
-  struct Node_ *next;
-} Node;
-
-typedef struct {
-  Node **buckets;
-  size_t size;
-  size_t count;
-} HashTable;
-
-r_obj *create_string_object(const char *str);
+r_obj *create_string_object(const char *str, uint32_t length);
 r_obj *create_int_object(long long value);
 r_obj *create_double_object(double value);
 void free_object(r_obj *o);
 
-r_obj *create_hash_object();
-HashTable *hash_table_create(size_t size);
-void hash_table_set(HashTable *hash_table, const char *key, r_obj *val);
-r_obj *hash_table_get(HashTable *hash_table, const char *key);
-int hash_table_del(HashTable *hash_table, const char *key);
-void hash_table_destroy(HashTable *hash_table);
-
-#endif // !HASH_TABLE_H
+#endif // !RECIS_H

@@ -1,11 +1,13 @@
 #include "../include/zset.h"
-#include "../include/redis.h"
+#include "../include/recis.h"
 
+#include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-ZSkipListNode *zsl_create_node(int level, double score, char *element) {
+ZSkipListNode *zsl_create_node(int level, double score, Bytes *element) {
   ZSkipListNode *node;
   if ((node = (ZSkipListNode *)malloc(sizeof(ZSkipListNode) +
                                       level * sizeof(ZSkipListLevel))) == NULL)
@@ -49,7 +51,6 @@ void zsl_destroy(ZSkipList *zsl) {
 
   while (node) {
     next = node->level[0].forward;
-    free(node->element);
     free(node);
     node = next;
   }
@@ -58,7 +59,7 @@ void zsl_destroy(ZSkipList *zsl) {
   free(zsl);
 }
 
-ZSkipListNode *zsl_insert(ZSkipList *zsl, double score, char *element) {
+ZSkipListNode *zsl_insert(ZSkipList *zsl, double score, Bytes *element) {
   ZSkipListNode *update[ZSKIPLIST_MAX_LEVEL], *x;
   int i, level;
   unsigned int rank[ZSKIPLIST_MAX_LEVEL];
@@ -72,8 +73,7 @@ ZSkipListNode *zsl_insert(ZSkipList *zsl, double score, char *element) {
     while (x->level[i].forward &&
            (x->level[i].forward->score < score ||
             (x->level[i].forward->score == score &&
-             strcmp(x->level[i].forward->element, element) < 0))) {
-
+             bytes_compare(x->level[i].forward->element, element) < 0))) {
       rank[i] += x->level[i].span;
       x = x->level[i].forward;
     }
@@ -139,7 +139,7 @@ void zset_destroy(ZSet *zs) {
   free(zs);
 }
 
-int zsl_remove(ZSkipList *zsl, double score, char *element) {
+int zsl_remove(ZSkipList *zsl, double score, Bytes *element) {
   ZSkipListNode *x = zsl->head;
   ZSkipListNode *update[ZSKIPLIST_MAX_LEVEL];
 
@@ -148,7 +148,7 @@ int zsl_remove(ZSkipList *zsl, double score, char *element) {
     while (x->level[i].forward &&
            (x->level[i].forward->score < score ||
             (x->level[i].forward->score == score &&
-             strcmp(x->level[i].forward->element, element) < 0))) {
+             bytes_compare(x->level[i].forward->element, element) < 0))) {
       x = x->level[i].forward;
     }
     update[i] = x;
@@ -156,7 +156,7 @@ int zsl_remove(ZSkipList *zsl, double score, char *element) {
 
   ZSkipListNode *candidate = update[0]->level[0].forward;
   if (candidate != NULL && candidate->score == score &&
-      strcasecmp(candidate->element, element) == 0) {
+      bytes_equal(candidate->element, element) == 1) {
     for (i = zsl->level - 1; i >= 0; i--) {
       if (update[i]->level[i].forward == candidate) {
         update[i]->level[i].span += candidate->level[i].span - 1;
@@ -178,7 +178,6 @@ int zsl_remove(ZSkipList *zsl, double score, char *element) {
 
     zsl->length--;
 
-    free(candidate->element);
     free(candidate);
 
     return 1;
@@ -187,7 +186,7 @@ int zsl_remove(ZSkipList *zsl, double score, char *element) {
   return 0;
 }
 
-int zset_add(ZSet *zs, char *element, double score) {
+int zset_add(ZSet *zs, Bytes *element, double score) {
   r_obj *score_o;
   if ((score_o = hash_table_get(zs->dict, element)) != NULL) {
     double current_score = *(double *)score_o->data;
@@ -197,17 +196,17 @@ int zset_add(ZSet *zs, char *element, double score) {
     if (zsl_remove(zs->zsl, current_score, element) == 0)
       return 0;
 
-    zsl_insert(zs->zsl, score, strdup(element));
+    zsl_insert(zs->zsl, score, element);
     hash_table_set(zs->dict, element, create_double_object(score));
 
     return 1;
   }
 
-  char *element_copy = strdup(element);
+  Bytes *element_copy = bytes_dup(element);
 
   zsl_insert(zs->zsl, score, element_copy);
 
-  hash_table_set(zs->dict, element, create_double_object(score));
+  hash_table_set(zs->dict, element_copy, create_double_object(score));
 
   return 1;
 }
@@ -272,14 +271,15 @@ ZSkipListNode *zsl_last_in_range(ZSkipList *zsl, double max) {
   return NULL;
 }
 
-ZSkipListNode *zsl_last_in_lex_range(ZSkipList *zsl, char *max, int inclusive) {
+ZSkipListNode *zsl_last_in_lex_range(ZSkipList *zsl, Bytes *max,
+                                     int inclusive) {
   ZSkipListNode *x = zsl->head;
   int i;
 
   for (i = zsl->level - 1; i >= 0; i--) {
     while (x->level[i].forward) {
-      char *next_val = x->level[i].forward->element;
-      int cmp = strcmp(next_val, max);
+      Bytes *next_val = x->level[i].forward->element;
+      int cmp = bytes_compare(next_val, max);
 
       if (inclusive ? (cmp <= 0) : (cmp < 0)) {
         x = x->level[i].forward;
@@ -295,14 +295,14 @@ ZSkipListNode *zsl_last_in_lex_range(ZSkipList *zsl, char *max, int inclusive) {
   return NULL;
 }
 
-ZSkipListNode *zsl_first_in_lex_range(ZSkipList *zsl, char *min,
+ZSkipListNode *zsl_first_in_lex_range(ZSkipList *zsl, Bytes *min,
                                       int inclusive) {
   ZSkipListNode *x = zsl->head;
   int i;
   for (i = zsl->level - 1; i >= 0; i--) {
     while (x->level[i].forward) {
-      char *next_val = x->level[i].forward->element;
-      int cmp = strcmp(next_val, min);
+      Bytes *next_val = x->level[i].forward->element;
+      int cmp = bytes_compare(next_val, min);
 
       if (inclusive ? (cmp < 0) : (cmp <= 0)) {
         x = x->level[i].forward;
@@ -316,7 +316,7 @@ ZSkipListNode *zsl_first_in_lex_range(ZSkipList *zsl, char *min,
   return x;
 }
 
-unsigned long zsl_get_rank(ZSkipList *zsl, double score, char *element) {
+unsigned long zsl_get_rank(ZSkipList *zsl, double score, Bytes *element) {
   ZSkipListNode *x = zsl->head;
   unsigned long rank = 0;
   int i;
@@ -325,12 +325,12 @@ unsigned long zsl_get_rank(ZSkipList *zsl, double score, char *element) {
     while (x->level[i].forward &&
            (x->level[i].forward->score < score ||
             (x->level[i].forward->score == score &&
-             strcmp(x->level[i].forward->element, element) <= 0))) {
+             bytes_equal(x->level[i].forward->element, element) <= 0))) {
 
       rank += x->level[i].span;
       x = x->level[i].forward;
 
-      if (x->score == score && strcmp(x->element, element) == 0)
+      if (x->score == score && bytes_equal(x->element, element) == 0)
         return rank;
     }
   }
@@ -346,10 +346,10 @@ void zrange_emit_node(OutputBuffer *ob, ZSkipListNode *node, int with_scores) {
   char buf[128];
   int len;
 
-  size_t val_len = strlen(node->element);
-  len = snprintf(buf, sizeof(buf), "$%zu\r\n", val_len);
+  uint32_t val_len = node->element->length;
+  len = snprintf(buf, sizeof(buf), "$%" PRIu32 "\r\n", val_len);
   append_to_output_buffer(ob, buf, len);
-  append_to_output_buffer(ob, node->element, val_len);
+  append_to_output_buffer(ob, node->element->data, val_len);
   append_to_output_buffer(ob, "\r\n", 2);
 
   if (with_scores) {

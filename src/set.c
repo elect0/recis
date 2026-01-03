@@ -1,5 +1,6 @@
 #include "../include/set.h"
-#include "../include/redis.h"
+#include "../include/hash_table.h"
+#include "../include/recis.h"
 #include <stdlib.h>
 
 static char *SET_DUMMY_VALUE = "1";
@@ -22,21 +23,21 @@ r_obj *create_set_object() {
   return o;
 }
 
-int set_add(Set *set, char *member) {
+int set_add(Set *set, Bytes *member) {
   if (hash_table_get(set, member) != NULL)
     return 0;
 
-  hash_table_set(set, member, create_string_object(SET_DUMMY_VALUE));
+  hash_table_set(set, member, create_string_object(SET_DUMMY_VALUE, 1));
   return 1;
 }
 
-int set_rem(Set *set, char *member) {
+int set_rem(Set *set, Bytes *member) {
   if (hash_table_get(set, member) == NULL)
     return 0;
 
   return hash_table_del(set, member);
 }
 
-int set_is_member(Set *set, char *member) {
+int set_is_member(Set *set, Bytes *member) {
   return hash_table_get(set, member) != NULL;
 }

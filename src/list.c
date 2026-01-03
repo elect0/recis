@@ -1,7 +1,7 @@
 #include "../include/list.h"
+#include "../include/recis.h"
 #include "stdlib.h"
 #include <stdio.h>
-#include <string.h>
 
 r_obj *create_list_object() {
   r_obj *o;
@@ -33,14 +33,14 @@ List *list_create() {
   return list;
 }
 
-int list_ins_node_head(List *list, const void *value) {
+int list_ins_node_head(List *list, r_obj *value) {
   ListNode *new_node;
 
   if ((new_node = (ListNode *)malloc(sizeof(ListNode))) == NULL) {
     return -1;
   }
 
-  new_node->value = (void *)value;
+  new_node->value = value;
 
   if (list_size(list) == 0) {
     list->head = list->tail = new_node;
@@ -56,14 +56,14 @@ int list_ins_node_head(List *list, const void *value) {
   return 0;
 }
 
-int list_ins_node_tail(List *list, const void *value) {
+int list_ins_node_tail(List *list, r_obj *value) {
   ListNode *new_node;
 
   if ((new_node = (ListNode *)malloc(sizeof(ListNode))) == NULL) {
     return -1;
   }
 
-  new_node->value = (void *)value;
+  new_node->value = value;
 
   if (list_size(list) == 0) {
     list->tail = list->head = new_node;
@@ -79,12 +79,12 @@ int list_ins_node_tail(List *list, const void *value) {
   return 0;
 }
 
-void *list_pop_tail(List *list) {
+r_obj *list_pop_tail(List *list) {
   if (list_size(list) == 0)
     return NULL;
 
   ListNode *node = list->tail;
-  void *value = node->value;
+  r_obj *value = node->value;
 
   if (list->head == list->tail) {
     list->head = NULL;
@@ -100,11 +100,11 @@ void *list_pop_tail(List *list) {
   return value;
 }
 
-void *list_pop_head(List *list) {
+r_obj *list_pop_head(List *list) {
   if (list_size(list) == 0)
     return NULL;
   ListNode *node = list->head;
-  void *value = node->value;
+  r_obj *value = node->value;
 
   if (list->head == list->tail) {
     list->head = NULL;
@@ -144,11 +144,10 @@ void list_destroy(List *list) {
     return;
 
   while (list->size > 0) {
-    void *value = list_pop_tail(list);
+    r_obj *value = list_pop_tail(list);
 
-    if (value) {
-      free(value);
-    }
+    if (value)
+      free_object(value);
   }
 
   free(list);

@@ -48,8 +48,10 @@ int read_from_client(Client *client) {
 void reset_client_args(Client *client) {
   if (client->arg_values) {
     for (int i = 0; i < client->arg_count; i++) {
-      free(client->arg_values[i]);
-      client->arg_values[i] = NULL;
+      if (client->arg_values[i] != NULL) {
+        free_bytes_object(client->arg_values[i]);
+        client->arg_values[i] = NULL;
+      }
     }
   }
 

@@ -1,9 +1,9 @@
 #ifndef COMMAND_H
 #define COMMAND_H
 
+#include "hash_table.h"
 #include "networking.h"
 #include "parser.h"
-#include "redis.h"
 
 typedef void (*commandProc)(Client *client, HashTable *db, HashTable *expires,
                             OutputBuffer *ob);
@@ -17,7 +17,7 @@ typedef struct Command_ {
 r_obj *create_command_object(Command *cmd);
 
 long long get_time_ms();
-void populate_command_table(HashTable *registry);
+Command *command_lookup(char *name, int len);
 
 void set_command(Client *client, HashTable *db, HashTable *expires,
                  OutputBuffer *ob);
@@ -60,11 +60,11 @@ void sismember_command(Client *client, HashTable *db, HashTable *expires,
 void hset_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob);
 void hget_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob); 
+                  OutputBuffer *ob);
 void hmget_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob);
+                   OutputBuffer *ob);
 void hincrby_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob);
+                     OutputBuffer *ob);
 void zadd_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob);
 void zrange_command(Client *client, HashTable *db, HashTable *expires,

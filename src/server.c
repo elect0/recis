@@ -16,7 +16,7 @@
 #include "../include/networking.h"
 #include "../include/parser.h"
 #include "../include/persistance.h"
-#include "../include/redis.h"
+#include "../include/recis.h"
 
 #define PORT 6379
 #define BUFFER_SIZE 1024
@@ -52,7 +52,7 @@ void active_expire_cycle(HashTable *db, HashTable *expires) {
       long long *kill_time = (long long *)node->value->data;
 
       if (now > *kill_time) {
-        printf("[Active expire]: Deleting '%s'\n", node->key);
+        printf("[Active expire]: Deleting '%s'\n", node->key->data);
         hash_table_del(db, node->key);
         hash_table_del(expires, node->key);
       }
@@ -97,10 +97,10 @@ int main() {
 
   HashTable *db = hash_table_create(1024);
   HashTable *expires = hash_table_create(16);
-  HashTable *cmd_registry = hash_table_create(32);
-
-  populate_command_table(cmd_registry);
-
+  // HashTable *cmd_registry = hash_table_create(32);
+  //
+  // populate_command_table(cmd_registry);
+  //
   rdb_load(db, expires, "dump.rdb");
 
   set_nonblocking(server_fd);
@@ -179,18 +179,16 @@ int main() {
 
         if (parse_resp_request(c) == 1) {
           if (c->arg_count > 0) {
-            char **arg_values = c->arg_values;
+            Bytes **arg_values = c->arg_values;
             int arg_count = c->arg_count;
             OutputBuffer *ob = c->output_buffer;
 
-            char *cmd_name = arg_values[0];
-            r_obj *cmd_obj = hash_table_get(cmd_registry, cmd_name);
+            Bytes *cmd_name = arg_values[0];
+            Command *cmd = command_lookup(cmd_name->data, cmd_name->length);
 
-            if (cmd_obj == NULL || cmd_obj->type != COMMAND) {
+            if (cmd == NULL) {
               append_to_output_buffer(ob, "-ERR unknown command\r\n", 22);
             } else {
-              Command *cmd = (Command *)cmd_obj->data;
-
               cmd->proc(c, db, expires, ob);
             }
           }
