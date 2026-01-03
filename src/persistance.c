@@ -2,6 +2,7 @@
 #include "../include/list.h"
 #include "../include/set.h"
 #include "../include/zset.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,7 @@
 
 void rdb_save(HashTable *db, HashTable *expires, char *filename) {
   FILE *fp = fopen(filename, "wb"); // write binary
+
   if (!fp) {
     printf("[ERROR] Couldn't open file for writing: %s\n", filename);
     return;
@@ -27,7 +29,7 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
       r_obj *val = (r_obj *)node->value;
 
       r_obj *expire_entry = hash_table_get(expires, key);
-      long long expire_time = 0;
+      uint64_t expire_time = 0;
 
       if (expire_entry != NULL) {
         expire_time = (long long)expire_entry->data;
@@ -36,32 +38,32 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
       unsigned char type = (unsigned char)val->type;
       fwrite(&type, sizeof(unsigned char), 1, fp);
 
-      fwrite(&expire_time, sizeof(long long), 1, fp);
+      fwrite(&expire_time, sizeof(uint64_t), 1, fp);
 
-      int key_len = strlen(key);
-      fwrite(&key_len, sizeof(int), 1, fp);
+      uint32_t key_len = (uint32_t)strlen(key);
+      fwrite(&key_len, sizeof(uint32_t), 1, fp);
 
       fwrite(key, key_len, 1, fp);
 
       if (val->type == STRING) {
         char *str_val = (char *)val->data;
-        int val_len = strlen(str_val);
+        uint32_t val_len = (uint32_t)strlen(str_val);
 
-        fwrite(&val_len, sizeof(int), 1, fp);
+        fwrite(&val_len, sizeof(uint32_t), 1, fp);
         fwrite(str_val, val_len, 1, fp);
       } else if (val->type == SET) {
         HashTable *set_ht = (Set *)val->data;
 
-        int count = set_ht->count;
-        fwrite(&count, sizeof(int), 1, fp);
+        uint64_t count = (uint64_t)set_ht->count;
+        fwrite(&count, sizeof(uint64_t), 1, fp);
 
         for (size_t j = 0; j < set_ht->size; j++) {
           Node *set_node = set_ht->buckets[j];
           while (set_node) {
             char *member = set_node->key;
-            int member_len = strlen(member);
+            uint32_t member_len = (uint32_t)strlen(member);
 
-            fwrite(&member_len, sizeof(int), 1, fp);
+            fwrite(&member_len, sizeof(uint32_t), 1, fp);
             fwrite(member, member_len, 1, fp);
 
             set_node = set_node->next;
@@ -70,23 +72,23 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
       } else if (val->type == HASH) {
         HashTable *ht = (HashTable *)val->data;
 
-        int count = ht->count;
-        fwrite(&count, sizeof(int), 1, fp);
+        uint64_t count = (uint64_t)ht->count;
+        fwrite(&count, sizeof(uint64_t), 1, fp);
 
         for (size_t j = 0; j < ht->size; j++) {
           Node *set_node = ht->buckets[j];
           while (set_node) {
             char *field = set_node->key;
-            int field_len = strlen(field);
+            uint32_t field_len = (uint32_t)strlen(field);
 
-            fwrite(&field_len, sizeof(int), 1, fp);
+            fwrite(&field_len, sizeof(uint32_t), 1, fp);
             fwrite(field, field_len, 1, fp);
 
             r_obj *value_o = (r_obj *)set_node->value;
             char *value = (char *)value_o->data;
-            int value_len = strlen(value);
+            uint32_t value_len = (uint32_t)strlen(value);
 
-            fwrite(&value_len, sizeof(int), 1, fp);
+            fwrite(&value_len, sizeof(uint32_t), 1, fp);
             fwrite(value, value_len, 1, fp);
 
             set_node = set_node->next;
@@ -96,27 +98,27 @@ void rdb_save(HashTable *db, HashTable *expires, char *filename) {
       } else if (val->type == LIST) {
         List *list = (List *)val->data;
 
-        int size = list->size;
-        fwrite(&size, sizeof(int), 1, fp);
+        uint64_t size = (uint64_t)list->size;
+        fwrite(&size, sizeof(uint64_t), 1, fp);
 
         ListNode *member;
         for (member = list->head; member != NULL; member = member->next) {
           char *item = member->value;
-          int item_len = strlen(item);
+          uint32_t item_len = (uint32_t)strlen(item);
 
-          fwrite(&item_len, sizeof(int), 1, fp);
+          fwrite(&item_len, sizeof(uint32_t), 1, fp);
           fwrite(item, item_len, 1, fp);
         }
       } else if (val->type == ZSET) {
         ZSet *zs = (ZSet *)val->data;
         ZSkipList *zsl = zs->zsl;
 
-        unsigned int length = zsl->length;
-        fwrite(&length, sizeof(unsigned int), 1, fp);
+        uint64_t length = (uint64_t)zsl->length;
+        fwrite(&length, sizeof(uint64_t), 1, fp);
 
         ZSkipListNode *node = zsl->head->level[0].forward;
         while (node) {
-          int mem_len = strlen(node->element);
+          uint32_t mem_len = (uint32_t)strlen(node->element);
           fwrite(&mem_len, sizeof(int), 1, fp);
           fwrite(node->element, mem_len, 1, fp);
 
@@ -144,11 +146,11 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
   unsigned char type;
   while (fread(&type, sizeof(unsigned char), 1, fp)) {
 
-    long long expire_time;
-    fread(&expire_time, sizeof(long long), 1, fp);
+    uint64_t expire_time;
+    fread(&expire_time, sizeof(uint64_t), 1, fp);
 
-    int key_len;
-    fread(&key_len, sizeof(int), 1, fp);
+    uint32_t key_len;
+    fread(&key_len, sizeof(uint32_t), 1, fp);
 
     char *key = (char *)malloc(key_len + 1);
     fread(key, key_len, 1, fp);
@@ -157,8 +159,8 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
     printf("[RDB] Loading key: %s, type: %d\n", key, type);
 
     if (type == RDB_TYPE_STRING) {
-      int val_len;
-      fread(&val_len, sizeof(int), 1, fp);
+      uint32_t val_len;
+      fread(&val_len, sizeof(uint32_t), 1, fp);
 
       char *val_str = (char *)malloc(val_len + 1);
       fread(val_str, val_len, 1, fp);
@@ -167,63 +169,66 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
       r_obj *o = create_string_object(val_str);
 
       hash_table_set(db, strdup(key), o);
+      free(val_str);
     } else if (type == RDB_TYPE_SET) {
-      int count;
-      if (fread(&count, sizeof(int), 1, fp) != 1)
+      uint64_t count;
+      if (fread(&count, sizeof(uint64_t), 1, fp) != 1)
         break;
 
       r_obj *o = create_set_object();
 
-      for (int i = 0; i < count; i++) {
-        int member_len;
-        fread(&member_len, sizeof(int), 1, fp);
+      for (uint64_t i = 0; i < count; i++) {
+        uint32_t member_len;
+        fread(&member_len, sizeof(uint32_t), 1, fp);
 
         char *member = (char *)malloc(member_len + 1);
         fread(member, member_len, 1, fp);
         member[member_len] = '\0';
 
         set_add((Set *)o->data, member);
+        free(member);
       }
 
       hash_table_set(db, strdup(key), o);
     } else if (type == RDB_TYPE_HASH) {
-      int count;
-      if (fread(&count, sizeof(int), 1, fp) != 1)
+      uint64_t count;
+      if (fread(&count, sizeof(uint64_t), 1, fp) != 1)
         break;
 
       r_obj *o = create_hash_object();
 
-      for (int i = 0; i < count; i++) {
-        int field_len;
-        fread(&field_len, sizeof(int), 1, fp);
+      for (uint64_t i = 0; i < count; i++) {
+        uint32_t field_len;
+        fread(&field_len, sizeof(uint32_t), 1, fp);
 
         char *field = (char *)malloc(field_len + 1);
         fread(field, field_len, 1, fp);
         field[field_len] = '\0';
 
-        int value_len;
-        fread(&value_len, sizeof(int), 1, fp);
+        uint32_t value_len;
+        fread(&value_len, sizeof(uint32_t), 1, fp);
 
         char *value = (char *)malloc(value_len + 1);
         fread(value, value_len, 1, fp);
         value[value_len] = '\0';
 
-
         hash_table_set((HashTable *)o->data, field,
                        create_string_object(value));
+        free(field);
+        free(value);
       }
       hash_table_set(db, strdup(key), o);
     } else if (type == RDB_TYPE_LIST) {
-      int size;
-      if (fread(&size, sizeof(int), 1, fp) != 1)
+      uint64_t size;
+      if (fread(&size, sizeof(uint64_t), 1, fp) != 1)
         break;
 
       r_obj *o = create_list_object();
       List *list = (List *)o->data;
 
-      for (int i = 0; i < size; i++) {
-        int val_len;
-        fread(&val_len, sizeof(int), 1, fp);
+      for (uint64_t i = 0; i < size; i++) {
+        uint32_t val_len;
+        fread(&val_len, sizeof(uint32_t), 1, fp);
 
         char *val_str = malloc(val_len + 1);
         fread(val_str, val_len, 1, fp);
@@ -234,16 +239,16 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
       }
       hash_table_set(db, strdup(key), o);
     } else if (type == RDB_TYPE_ZSET) {
-      unsigned int length;
-      if (fread(&length, sizeof(unsigned int), 1, fp) != 1)
+      uint64_t length;
+      if (fread(&length, sizeof(uint64_t), 1, fp) != 1)
         break;
 
       r_obj *o = create_zset_object();
       ZSet *zs = (ZSet *)o->data;
 
-      for (unsigned int i = 0; i < length; i++) {
-        int mem_len;
-        fread(&mem_len, sizeof(int), 1, fp);
+      for (uint64_t i = 0; i < length; i++) {
+        uint32_t mem_len;
+        fread(&mem_len, sizeof(uint32_t), 1, fp);
         char *member = malloc(mem_len + 1);
         fread(member, mem_len, 1, fp);
         member[mem_len] = '\0';
@@ -252,16 +257,13 @@ void rdb_load(HashTable *db, HashTable *expires, char *filename) {
         fread(&score, sizeof(double), 1, fp);
 
         zset_add(zs, member, score);
-
         free(member);
-
-        hash_table_set(db, strdup(key), o);
       }
+      hash_table_set(db, strdup(key), o);
     }
-
     if (expire_time > 0) {
       time_t now = time(NULL);
-      long long current_ms = now * 1000;
+      uint64_t current_ms = (uint64_t)now * 1000;
 
       if (expire_time < current_ms) {
         hash_table_del(db, key);
