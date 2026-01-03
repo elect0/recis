@@ -27,6 +27,10 @@ void del_command(Client *client, HashTable *db, HashTable *expires,
                  OutputBuffer *ob);
 void ttl_command(Client *client, HashTable *db, HashTable *expires,
                  OutputBuffer *ob);
+void incr_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob);
+void incrby_command(Client *client, HashTable *db, HashTable *expires,
+                    OutputBuffer *ob);
 void lpush_command(Client *client, HashTable *db, HashTable *expires,
                    OutputBuffer *ob);
 void rpush_command(Client *client, HashTable *db, HashTable *expires,
