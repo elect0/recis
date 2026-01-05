@@ -65,5 +65,4 @@ void reset_client_args(Client *client) {
   }
 
   client->arg_count = 0;
-  // client->query_length = 0;
 }

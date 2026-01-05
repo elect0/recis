@@ -71,6 +71,10 @@ void hincrby_command(Client *client, HashTable *db, HashTable *expires,
                      OutputBuffer *ob);
 void zadd_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob);
+void zrem_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob);
+void zcard_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob);
 void zrange_command(Client *client, HashTable *db, HashTable *expires,
                     OutputBuffer *ob);
 void zscore_command(Client *client, HashTable *db, HashTable *expires,

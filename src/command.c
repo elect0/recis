@@ -31,6 +31,7 @@ Command CommandTable[] = {
     {"SMEMEBERS", smembers_command, 2}, {"HSET", hset_command, -4},
     {"HGET", hget_command, 3},          {"HMGET", hmget_command, -3},
     {"HINCRBY", hincrby_command, 4},    {"ZADD", zadd_command, -4},
+    {"ZREM", zrem_command, -3}, {"ZCARD", zcard_command, 2},
     {"ZRANGE", zrange_command, -4},     {"ZSCORE", zscore_command, 3},
     {"ZRANK", zrank_command, 3},        {"SAVE", save_command, 1},
     {"PING", ping_command, 1},          {NULL, NULL, 0}};
@@ -1829,6 +1830,96 @@ void zadd_command(Client *client, HashTable *db, HashTable *expires,
     int resp_len = snprintf(resp, sizeof(resp), ":%d\r\n", ret_val);
     append_to_output_buffer(ob, resp, resp_len);
   }
+  return;
+}
+
+void zrem_command(Client *client, HashTable *db, HashTable *expires,
+                  OutputBuffer *ob) {
+  Bytes **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count < 3) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, ":0\r\n", 4);
+    return;
+  }
+
+  if (o->type != ZSET) {
+    append_to_output_buffer(ob,
+                            "-WRONGTYPE Operation against a key holding the "
+                            "wrong kind of value\r\n",
+                            68);
+    return;
+  }
+
+  ZSet *zs = (ZSet *)o->data;
+
+  int j;
+  int deleted_count = 0;
+  for (j = 2; j < arg_count; j++) {
+    Bytes *member = arg_values[j];
+
+    r_obj *score_o = hash_table_get(zs->dict, member);
+
+    if (score_o == NULL) {
+      continue;
+    }
+
+    double score = *(double *)score_o->data;
+
+    if (zsl_remove(zs->zsl, score, member) == 1 &&
+        hash_table_del(zs->dict, member) == 1) {
+      deleted_count++;
+    }
+  }
+
+  if (zs->dict->count == 0) {
+    hash_table_del(db, arg_values[1]);
+    hash_table_del(expires, arg_values[1]);
+  }
+
+  char num_str[64];
+  int num_len = snprintf(num_str, sizeof(num_str), ":%d\r\n", deleted_count);
+  append_to_output_buffer(ob, num_str, num_len);
+  return;
+}
+
+void zcard_command(Client *client, HashTable *db, HashTable *expires,
+                   OutputBuffer *ob) {
+  Bytes **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 2) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(db, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, ":0\r\n", 4);
+    return;
+  }
+
+  if (o->type != ZSET) {
+    append_to_output_buffer(ob,
+                            "-WRONGTYPE Operation against a key holding the "
+                            "wrong kind of value\r\n",
+                            68);
+    return;
+  }
+
+  ZSet *zs = (ZSet *)o->data;
+
+  char num_str[64];
+  int num_len = snprintf(num_str, sizeof(num_str), ":%zu\r\n", zs->dict->count);
+  append_to_output_buffer(ob, num_str, num_len);
   return;
 }
 

@@ -66,7 +66,9 @@ ZSkipListNode *zsl_last_in_range(ZSkipList *zsl, double max);
 ZSkipListNode *zsl_last_in_lex_range(ZSkipList *zsl, Bytes *max, int inclusive);
 ZSkipListNode *zsl_get_element_by_rank(ZSkipList *zsl, int rank);
 ZSkipListNode *zsl_first_in_range(ZSkipList *zsl, double min);
-ZSkipListNode *zsl_first_in_lex_range(ZSkipList *zsl, Bytes *min, int inclusive);
+int zsl_remove(ZSkipList *zsl, double score, Bytes *element);
+ZSkipListNode *zsl_first_in_lex_range(ZSkipList *zsl, Bytes *min,
+                                      int inclusive);
 unsigned long zsl_get_rank(ZSkipList *zsl, double score, Bytes *element);
 
 #endif // !ZSET_H
