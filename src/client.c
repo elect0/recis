@@ -1,12 +1,20 @@
 #include "../include/client.h"
 #include <asm-generic/errno-base.h>
 #include <errno.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <stdio.h>
 #include <unistd.h>
 
 Client *create_client(int fd) {
   Client *client;
   if ((client = (Client *)malloc(sizeof(Client))) == NULL)
     return NULL;
+
+  int yes = 1;
+  if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) == -1) {
+    perror("setsockopt TCP_NODELAY");
+  }
   client->fd = fd;
 
   client->query_cap = 4096;
@@ -19,6 +27,7 @@ Client *create_client(int fd) {
   client->arg_count = 0;
   client->arg_values = NULL;
   client->arg_values_cap = 0;
+  client->query_pos = 0;
 
   client->output_buffer = create_output_buffer(fd);
 
@@ -34,11 +43,11 @@ int read_from_client(Client *client) {
   ssize_t nread = read(client->fd, client->query_buffer + client->query_length,
                        client->query_cap - client->query_length);
   if (nread == -1) {
-    if (errno == EAGAIN)
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
       return 0;
     return -1;
-  } else if (nread == -1) {
-    return 0;
+  } else if (nread == 0) {
+    return -1;
   }
 
   client->query_length += nread;
@@ -56,5 +65,5 @@ void reset_client_args(Client *client) {
   }
 
   client->arg_count = 0;
-  client->query_length = 0;
+  // client->query_length = 0;
 }

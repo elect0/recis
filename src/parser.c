@@ -5,74 +5,69 @@
 
 #include "../include/parser.h"
 
-
 // read until carriage return + new line
 
-int read_until_crlf(const char *buffer, int input_len, int *pos, char *out,
-                    int max_out_len) {
+size_t read_until_crlf(const char *buffer, size_t input_len, size_t *pos,
+                       char *out, size_t max_out_len) {
+  size_t p = *pos;
+  size_t i = 0;
 
-  int i = 0;
-  while (*pos < input_len && buffer[*pos] != '\r') {
-    if (buffer[*pos] == '\n') {
+  while (p < input_len) {
+    if (buffer[p] == '\r') {
+      if (p + 1 < input_len && buffer[p + 1] == '\n') {
+        out[i] = '\0';
+        *pos = p + 2;
+        return 1;
+      } else {
+        return -1;
+      }
+    } else if (buffer[p] == '\n') {
       return -1;
     }
 
-    if (i < max_out_len) {
-      out[i++] = buffer[*pos];
+    if (i < max_out_len - 1) {
+      out[i++] = buffer[p];
     }
-
-    (*pos)++;
+    p++;
   }
 
-  if (*pos >= input_len) {
-    return -1;
-  }
-
-  if (buffer[*pos] == '\r') {
-    if ((*pos + 1) >= input_len || buffer[*pos + 1] != '\n') {
-      return -1;
-    }
-  }
-
-  out[i] = '\0';
-  (*pos) += 2;
   return 0;
 }
 
-int parse_resp_request(Client *client) {
-  char *buffer = client->query_buffer;
-  int len = client->query_length;
-  if (len <= 0)
+size_t parse_resp_request(Client *client, char *buffer, size_t len) {
+  if (len == 0)
     return 0;
 
   if (client->arg_values == NULL) {
     client->arg_values_cap = 4;
-    if ((client->arg_values =
-             malloc(sizeof(Bytes *) * client->arg_values_cap)) == NULL)
+    client->arg_values = malloc(sizeof(Bytes *) * client->arg_values_cap);
+    if (client->arg_values == NULL)
       return -1;
   }
-
   client->arg_count = 0;
 
   if (buffer[0] != '*') {
-    char *p = buffer;
-    char *end = buffer + len;
+    char *new_line = memchr(buffer, '\n', len);
+    if (!new_line)
+      return 0;
 
-    while (p < end) {
-      while (p < end && *p != ' ')
-        p++;
-      if (p == end)
+    size_t line_len = new_line - buffer + 1;
+    size_t pos = 0;
+
+    while (pos < line_len) {
+      while (pos < line_len && buffer[pos] <= ' ')
+        pos++;
+      if (pos >= line_len)
         break;
 
-      char *token_start = p;
-      while (p < end && *p != ' ' && *p != '\r' && *p != '\n')
-        p++;
+      char *token_start = buffer + pos;
+      size_t start_idx = pos;
 
-      ssize_t token_len = p - token_start;
-      if (token_len == 0)
-        continue;
+      while (pos < line_len && buffer[pos] > ' ')
+        pos++;
+      size_t token_len = pos - start_idx;
 
-      if (client->arg_count > client->arg_values_cap) {
+      if (client->arg_count >= client->arg_values_cap) {
         client->arg_values_cap *= 2;
         client->arg_values = realloc(client->arg_values,
                                      sizeof(Bytes *) * client->arg_values_cap);
@@ -80,18 +75,19 @@ int parse_resp_request(Client *client) {
 
       client->arg_values[client->arg_count++] =
           create_bytes_object(token_start, (uint32_t)token_len);
-      // client->arg_values[client->arg_count] = malloc(token_len + 1);
-      // memcpy(client->arg_values[client->arg_count], token_start, token_len);
-      // client->arg_values[client->arg_count][token_len] = '\0';
-      // client->arg_count++;
     }
-    return 1;
+
+    return line_len;
   }
 
-  int pos = 1;
+  size_t pos = 1;
   char num_str[32];
-  if (read_until_crlf(buffer, len, &pos, num_str, 32) == -1)
+
+  int rc = read_until_crlf(buffer, len, &pos, num_str, 32);
+  if (rc == 0)
     return 0;
+  if (rc == -1)
+    return -1;
 
   int num_args = atoi(num_str);
   if (num_args < 0)
@@ -112,26 +108,125 @@ int parse_resp_request(Client *client) {
     pos++;
 
     char len_str[32];
-    if (read_until_crlf(buffer, len, &pos, len_str, 32) == -1)
+    rc = read_until_crlf(buffer, len, &pos, len_str, 32);
+    if (rc == 0)
       return 0;
+    if (rc == -1)
+      return -1;
 
     int arg_len = atoi(len_str);
-
     if (arg_len < 0)
       return -1;
 
     if (pos + arg_len + 2 > len)
       return 0;
-    //
-    // client->arg_values[client->arg_count] = malloc(arg_len + 1);
-    // memcpy(client->arg_values[client->arg_count], buffer + pos, arg_len);
-    // client->arg_values[client->arg_count][arg_len] = '\0';
-    // client->arg_count++;
+
     client->arg_values[client->arg_count++] =
         create_bytes_object(buffer + pos, (uint32_t)arg_len);
 
     pos += arg_len + 2;
   }
 
-  return 1;
+  return pos;
 }
+
+// size_t parse_resp_request(Client *client, char *buffer, size_t len) {
+//   if (len <= 0)
+//     return 0;
+//
+//   if (client->arg_values == NULL) {
+//     client->arg_values_cap = 4;
+//     if ((client->arg_values =
+//              malloc(sizeof(Bytes *) * client->arg_values_cap)) == NULL)
+//       return -1;
+//   }
+//
+//   client->arg_count = 0;
+//
+//   size_t pos = 0;
+//
+//   if (buffer[0] != '*') {
+//     size_t end = len;
+//
+//     while (pos < end) {
+//       while (buffer[pos] < end && buffer[pos] != ' ')
+//         pos++;
+//       if (pos == end)
+//         break;
+//
+//       char *token_start = buffer + pos;
+//       size_t token_start_index = pos;
+//       while (pos < end && buffer[pos] != ' ' && buffer[pos] != '\r' &&
+//              buffer[pos] != '\n')
+//         pos++;
+//
+//       ssize_t token_len = pos - token_start_index;
+//       if (token_len == 0)
+//         continue;
+//
+//       if (client->arg_count > client->arg_values_cap) {
+//         client->arg_values_cap *= 2;
+//         client->arg_values = realloc(client->arg_values,
+//                                      sizeof(Bytes *) *
+//                                      client->arg_values_cap);
+//       }
+//
+//       client->arg_values[client->arg_count++] =
+//           create_bytes_object(token_start, (uint32_t)token_len);
+//       // client->arg_values[client->arg_count] = malloc(token_len + 1);
+//       // memcpy(client->arg_values[client->arg_count], token_start,
+//       token_len);
+//       // client->arg_values[client->arg_count][token_len] = '\0';
+//       // client->arg_count++;
+//     }
+//     return pos;
+//   }
+//
+//   pos = 1;
+//   char num_str[32];
+//   if (read_until_crlf(buffer, len, &pos, num_str, 32) == -1)
+//     return 0;
+//
+//   int num_args = atoi(num_str);
+//   if (num_args < 0)
+//     return -1;
+//
+//   if (num_args > client->arg_values_cap) {
+//     client->arg_values_cap = num_args;
+//     client->arg_values =
+//         realloc(client->arg_values, sizeof(Bytes *) *
+//         client->arg_values_cap);
+//   }
+//
+//   for (int i = 0; i < num_args; i++) {
+//     if (pos >= len)
+//       return 0;
+//
+//     if (buffer[pos] != '$')
+//       return -1;
+//     pos++;
+//
+//     char len_str[32];
+//     if (read_until_crlf(buffer, len, &pos, len_str, 32) == -1)
+//       return 0;
+//
+//     int arg_len = atoi(len_str);
+//
+//     if (arg_len < 0)
+//       return -1;
+//
+//     if (pos + arg_len + 2 > len)
+//       return 0;
+//     //
+//     // client->arg_values[client->arg_count] = malloc(arg_len + 1);
+//     // memcpy(client->arg_values[client->arg_count], buffer + pos, arg_len);
+//     // client->arg_values[client->arg_count][arg_len] = '\0';
+//     // client->arg_count++;
+//     client->arg_values[client->arg_count++] =
+//         create_bytes_object(buffer + pos, (uint32_t)arg_len);
+//
+//     pos += arg_len + 2;
+//   }
+//
+//   return pos;
+// }

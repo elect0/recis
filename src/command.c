@@ -17,37 +17,23 @@
 #include <time.h>
 #include <unistd.h>
 
-Command CommandTable[] = {{"SET", set_command, -3},
-                          {"GET", get_command, 2},
-                          {"DEL", del_command, -2},
-                          {"TTL", ttl_command, 2},
-                          {"INCR", incr_command, 2},
-                          {"INCRBY", incrby_command, 3},
-                          {"LPUSH", lpush_command, -3},
-                          {"RPUSH", rpush_command, -3},
-                          {"RPOP", rpop_command, -2},
-                          {"LPOP", lpop_command, -2},
-                          {"LLEN", llen_command, 2},
-                          {"LINDEX", lindex_command, 3},
-                          {"LRANGE", lrange_command, 4},
-                          {"LMOVE", lmove_command, 5},
-                          {"LTRIM", ltrim_command, 4},
-                          {"SADD", sadd_command, -3},
-                          {"SREM", srem_command, -3},
-                          {"SCARD", scard_command, 2},
-                          {"SINTER", sinter_command, -2},
-                          {"SISMEMBER", sismember_command, 3},
-                          {"SMEMEBERS", smembers_command, 2},
-                          {"HSET", hset_command, -4},
-                          {"HGET", hget_command, 3},
-                          {"HMGET", hmget_command, -3},
-                          {"HINCRBY", hincrby_command, 4},
-                          {"ZADD", zadd_command, -4},
-                          {"ZRANGE", zrange_command, -4},
-                          {"ZSCORE", zscore_command, 3},
-                          {"ZRANK", zrank_command, 3},
-                          {"SAVE", save_command, 1},
-                          {NULL, NULL, 0}};
+Command CommandTable[] = {
+    {"SET", set_command, -3},           {"GET", get_command, 2},
+    {"DEL", del_command, -2},           {"TTL", ttl_command, 2},
+    {"INCR", incr_command, 2},          {"INCRBY", incrby_command, 3},
+    {"LPUSH", lpush_command, -3},       {"RPUSH", rpush_command, -3},
+    {"RPOP", rpop_command, -2},         {"LPOP", lpop_command, -2},
+    {"LLEN", llen_command, 2},          {"LINDEX", lindex_command, 3},
+    {"LRANGE", lrange_command, 4},      {"LMOVE", lmove_command, 5},
+    {"LTRIM", ltrim_command, 4},        {"SADD", sadd_command, -3},
+    {"SREM", srem_command, -3},         {"SCARD", scard_command, 2},
+    {"SINTER", sinter_command, -2},     {"SISMEMBER", sismember_command, 3},
+    {"SMEMEBERS", smembers_command, 2}, {"HSET", hset_command, -4},
+    {"HGET", hget_command, 3},          {"HMGET", hmget_command, -3},
+    {"HINCRBY", hincrby_command, 4},    {"ZADD", zadd_command, -4},
+    {"ZRANGE", zrange_command, -4},     {"ZSCORE", zscore_command, 3},
+    {"ZRANK", zrank_command, 3},        {"SAVE", save_command, 1},
+    {"PING", ping_command, 1},          {NULL, NULL, 0}};
 
 r_obj *create_command_object(Command *cmd) {
   r_obj *o;
@@ -289,7 +275,8 @@ void get_command(Client *client, HashTable *db, HashTable *expires,
       hash_table_del(db, arg_values[1]);
       hash_table_del(expires, arg_values[1]);
 
-      append_to_output_buffer(ob, "_\r\n", 3);
+      /* append_to_output_buffer(ob, "_\r\n", 3); */
+      append_to_output_buffer(ob, "$-1\r\n", 5);
       return;
     }
   }
@@ -297,7 +284,8 @@ void get_command(Client *client, HashTable *db, HashTable *expires,
   r_obj *o = hash_table_get(db, arg_values[1]);
 
   if (!o) {
-    append_to_output_buffer(ob, "_\r\n", 3);
+    /* append_to_output_buffer(ob, "_\r\n", 3); */
+    append_to_output_buffer(ob, "$-1\r\n", 5);
     return;
   }
 

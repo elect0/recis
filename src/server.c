@@ -177,22 +177,42 @@ int main() {
           continue;
         }
 
-        if (parse_resp_request(c) == 1) {
-          if (c->arg_count > 0) {
-            Bytes **arg_values = c->arg_values;
-            int arg_count = c->arg_count;
-            OutputBuffer *ob = c->output_buffer;
+        while (c->query_pos < c->query_length) {
+          char *current_ptr = c->query_buffer + c->query_pos;
+          size_t remaining_len = c->query_length - c->query_pos;
 
-            Bytes *cmd_name = arg_values[0];
-            Command *cmd = command_lookup(cmd_name->data, cmd_name->length);
+          size_t consumed = parse_resp_request(c, current_ptr, remaining_len);
 
-            if (cmd == NULL) {
-              append_to_output_buffer(ob, "-ERR unknown command\r\n", 22);
-            } else {
-              cmd->proc(c, db, expires, ob);
+          if (consumed > 0) {
+            if (c->arg_count > 0) {
+              Bytes **arg_values = c->arg_values;
+              int arg_count = c->arg_count;
+              OutputBuffer *ob = c->output_buffer;
+
+              Bytes *cmd_name = arg_values[0];
+              Command *cmd = command_lookup(cmd_name->data, cmd_name->length);
+
+              if (cmd == NULL) {
+                append_to_output_buffer(ob, "-ERR unknown command\r\n", 22);
+              } else {
+                cmd->proc(c, db, expires, ob);
+              }
+
+              c->query_pos += consumed;
+
+              reset_client_args(c);
             }
+          } else if (consumed == 0) {
+            break;
+          } else {
+            close(current_fd);
+            break;
           }
-          reset_client_args(c);
+        }
+
+        if (c->query_pos == c->query_length) {
+          c->query_pos = 0;
+          c->query_length = 0;
         }
 
         flush_buffer(c->output_buffer);

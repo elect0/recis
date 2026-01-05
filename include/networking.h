@@ -13,4 +13,5 @@ OutputBuffer *create_output_buffer(int fd);
 void append_to_output_buffer(OutputBuffer *ob, const char *data, size_t len);
 void flush_buffer(OutputBuffer *ob);
 
+
 #endif // !NETWORKING_H

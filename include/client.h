@@ -16,6 +16,7 @@ typedef struct Client_ {
   int arg_count;
   Bytes **arg_values;
   size_t arg_values_cap;
+  size_t query_pos;
 
   OutputBuffer *output_buffer;
 } Client;
