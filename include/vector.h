@@ -20,10 +20,9 @@ typedef struct VSResult_ {
 
 Vector *vector_create(uint32_t dimension, const float *init_data);
 void vector_free(Vector *v);
-
+Vector *create_random_vector(int dim);
+void vector_normalize(Vector *v);
 float vector_dist_l2(const Vector *v1, const Vector *v2);
 float vector_dist_cosine(const Vector *v1, const Vector *v2);
-
-float vector_dot_product(const Vector *v1, const Vector *v2);
 
 #endif // !VECTOR_H

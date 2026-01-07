@@ -46,9 +46,12 @@ typedef struct CandidateList_ {
 HNSWNode *hnsw_create_node(int L, int M, Vector *v, Bytes *key);
 HNSWIndex *hnsw_create(DistanceMetric metric, int M, int ef_construction);
 void hnsw_insert(HNSWIndex *index, const Bytes *key, Vector *v);
+HNSWNode **hnsw_search(HNSWIndex *index, Vector *query, int k,
+                       int *found_count);
 int hnsw_random_level(int M);
 uint32_t hnsw_search_layer_greedy(HNSWIndex *index, Vector *query,
                                   uint32_t entry_id, int layer);
-void hnsw_search_layer_0(HNSWIndex *index, Vector *query, uint32_t entry_id, CandidateList *results);
+void hnsw_search_layer_base(HNSWIndex *index, Vector *query, uint32_t entry_id,
+                            CandidateList *results, int layer);
 
 #endif // !HNSW_H

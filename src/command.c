@@ -31,7 +31,7 @@ Command CommandTable[] = {
     {"SMEMEBERS", smembers_command, 2}, {"HSET", hset_command, -4},
     {"HGET", hget_command, 3},          {"HMGET", hmget_command, -3},
     {"HINCRBY", hincrby_command, 4},    {"ZADD", zadd_command, -4},
-    {"ZREM", zrem_command, -3}, {"ZCARD", zcard_command, 2},
+    {"ZREM", zrem_command, -3},         {"ZCARD", zcard_command, 2},
     {"ZRANGE", zrange_command, -4},     {"ZSCORE", zscore_command, 3},
     {"ZRANK", zrank_command, 3},        {"SAVE", save_command, 1},
     {"PING", ping_command, 1},          {NULL, NULL, 0}};

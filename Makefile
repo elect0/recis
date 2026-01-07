@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -I include
+CFLAGS = -Wall -Wextra -I include -march=native -O3 -lm
 
 TARGET = server
 
