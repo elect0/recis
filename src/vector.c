@@ -1,4 +1,6 @@
 #include "../include/vector.h"
+#include "../include/recis.h"
+
 #include <immintrin.h>
 #include <math.h>
 #include <stdint.h>
@@ -16,6 +18,17 @@ static inline float hsum256_ps(__m256 v) {
   shuf = _mm_movehl_ps(shuf, sums);
   sums = _mm_add_ps(sums, shuf);
   return _mm_cvtss_f32(sums);
+}
+
+r_obj *create_vector_object(uint32_t dimension, const float *init_data) {
+  r_obj *o;
+  if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL)
+    return NULL;
+
+  o->type = VECTOR;
+  o->data = (void *)create_vector_object(dimension, init_data);
+
+  return o;
 }
 
 Vector *vector_create(uint32_t dimension, const float *init_data) {

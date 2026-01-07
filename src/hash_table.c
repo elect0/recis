@@ -1,4 +1,5 @@
 #include "../include/client.h"
+#include "../include/hnsw.h"
 #include "../include/list.h"
 #include "../include/recis.h"
 #include "../include/set.h"
@@ -201,6 +202,11 @@ void free_object(r_obj *o) {
   case HASH:
     hash_table_destroy((HashTable *)o->data);
     break;
+  case VECTOR:
+    vector_free((Vector *)o->data);
+    break;
+  case HNSW:
+    hnsw_free((HNSWIndex *)o->data);
   }
 
   free(o);

@@ -25,6 +25,8 @@ typedef enum {
   DOUBLE = 5,
   ZSET = 6,
   COMMAND = 7,
+  VECTOR = 8,
+  HNSW = 9,
 } obj_type;
 
 typedef struct RObj {

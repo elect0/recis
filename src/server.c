@@ -97,6 +97,7 @@ int main() {
 
   HashTable *db = hash_table_create(1024);
   HashTable *expires = hash_table_create(16);
+  HashTable *vector_indices = hash_table_create(1024);
   // HashTable *cmd_registry = hash_table_create(32);
   //
   // populate_command_table(cmd_registry);

@@ -2,6 +2,10 @@
 #define VECTOR_H
 
 #include "bytes.h"
+
+struct RObj;
+typedef struct RObj r_obj;
+
 typedef enum DistnaceMetric_ {
   METRIC_L2,
   METRIC_COSINE,
@@ -17,6 +21,8 @@ typedef struct VSResult_ {
   Bytes *key;
   double distance;
 } VSResult;
+
+r_obj *create_vector_object(uint32_t dimension, const float *init_data);
 
 Vector *vector_create(uint32_t dimension, const float *init_data);
 void vector_free(Vector *v);

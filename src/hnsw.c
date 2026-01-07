@@ -1,4 +1,6 @@
 #include "../include/hnsw.h"
+
+#include "../include/recis.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -26,6 +28,44 @@ static inline float get_dist(HNSWIndex *index, const Vector *v1,
     return vector_dist_l2(v1, v2);
   else
     return vector_dist_cosine(v1, v2);
+}
+
+r_obj *create_hnsw_object(DistanceMetric metric, int M, int ef_construction) {
+  r_obj *o;
+  if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL)
+    return NULL;
+
+  o->type = HNSW;
+  o->data = (void *)hnsw_create(metric, M, ef_construction);
+
+  return o;
+}
+
+void hnsw_free(HNSWIndex *index) {
+  if (index == NULL)
+    return;
+
+  while (index->count > 0) {
+    HNSWNode *node = index->nodes[index->count - 1];
+    if (node) {
+      if (node->key)
+        free_bytes_object(node->key);
+
+      if (node->vec)
+        vector_free(node->vec);
+
+      free(node);
+    }
+  }
+
+  if (index->nodes)
+    free(index->nodes);
+  if (index->visited_history)
+    free(index->visited_history);
+  if (index->visited_bitset)
+    free(index->visited_bitset);
+
+  free(index);
 }
 
 HNSWNode *hnsw_create_node(int level, int M, Vector *v, Bytes *key) {

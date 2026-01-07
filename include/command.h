@@ -81,6 +81,8 @@ void zscore_command(Client *client, HashTable *db, HashTable *expires,
                     OutputBuffer *ob);
 void zrank_command(Client *client, HashTable *db, HashTable *expires,
                    OutputBuffer *ob);
+void vidx_create_command(Client *client, HashTable *db, HashTable *expires,
+                   OutputBuffer *ob);
 void save_command(Client *client, HashTable *db, HashTable *expires,
                   OutputBuffer *ob);
 void ping_command(Client *client, HashTable *db, HashTable *expires,

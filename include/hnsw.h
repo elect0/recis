@@ -5,6 +5,9 @@
 #include "vector.h"
 #include <stdint.h>
 
+struct RObj;
+typedef struct RObj r_obj;
+
 typedef struct HNSWNode_ {
   Bytes *key;
   Vector *vec;
@@ -43,8 +46,11 @@ typedef struct CandidateList_ {
   uint16_t head;
 } CandidateList;
 
+r_obj *create_hnsw_object(DistanceMetric metric, int M, int ef_construction);
+
 HNSWNode *hnsw_create_node(int L, int M, Vector *v, Bytes *key);
 HNSWIndex *hnsw_create(DistanceMetric metric, int M, int ef_construction);
+void hnsw_free(HNSWIndex *index);
 void hnsw_insert(HNSWIndex *index, const Bytes *key, Vector *v);
 HNSWNode **hnsw_search(HNSWIndex *index, Vector *query, int k,
                        int *found_count);
