@@ -213,17 +213,25 @@ void free_object(r_obj *o) {
 }
 
 int hash_table_del(HashTable *hash_table, Bytes *key) {
+
+  printf("[DEBUG] DEL start. Key pointer: %p\n", key);
+
+  if (key && key->data)
+    printf("[DEBUG] Key string: %s\n", (char *)key->data);
+
   unsigned int slot = hash(key) % hash_table->size;
   Node *entry = hash_table->buckets[slot];
   Node *prev = NULL;
 
   while (entry) {
+
     if (bytes_equal(entry->key, key) == 1) {
       if (prev == NULL) {
         hash_table->buckets[slot] = entry->next;
       } else {
         prev->next = entry->next;
       }
+      printf("[DEBUG] Found match. Deleting...\n");
 
       free_object(entry->value);
 

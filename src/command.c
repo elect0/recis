@@ -2566,10 +2566,10 @@ void vadd_command(CommandContext *ctx) {
   }
 
   if (hash_table_get(db, arg_values[2]) != NULL) {
-    // TODO: Implement UPSERT
-    append_to_output_buffer(ob, ":0\r\n", 4);
-    vector_free(v);
-    return;
+    hnsw_del(idx, arg_values[2]);
+    r_obj *old_o = hash_table_get(db, arg_values[2]);
+printf("[DEBUG] DB is deleting vector at addr: %p\n", old_o->data); // <--- TRAP 1
+    hash_table_del(db, arg_values[2]);
   }
 
   hnsw_insert(idx, arg_values[2], v);

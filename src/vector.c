@@ -33,8 +33,11 @@ r_obj *create_vector_object(Vector *v) {
 
 Vector *vector_create(uint32_t dimension, const float *init_data) {
   void *ptr;
+
+  uint32_t padded_dim = (dimension + 7) & ~7;
+
   if (posix_memalign(&ptr, 32,
-                     sizeof(Vector) + (sizeof(float) * dimension) + 32) != 0)
+                     sizeof(Vector) + (sizeof(float) * padded_dim) + 32) != 0)
     return NULL;
 
   Vector *v = (Vector *)ptr;
@@ -44,8 +47,12 @@ Vector *vector_create(uint32_t dimension, const float *init_data) {
 
   if (init_data != NULL) {
     memcpy(v->data, init_data, sizeof(float) * dimension);
+
+    if (padded_dim > dimension) {
+      memset(v->data + dimension, 0, (padded_dim - dimension) * sizeof(float));
+    }
   } else {
-    memset(v->data, 0, sizeof(float) * dimension);
+    memset(v->data, 0, sizeof(float) * padded_dim);
   }
 
   return v;
@@ -71,14 +78,16 @@ float vector_dist_l2(const Vector *v1, const Vector *v2) {
   int i = 0;
 
 #ifdef __AVX__
-  __m256 sum256 = _mm256_setzero_ps();
-  for (; i <= v1->dimension - 8; i += 8) {
-    __m256 a = _mm256_loadu_ps(v1->data + i);
-    __m256 b = _mm256_loadu_ps(v2->data + i);
-    __m256 diff = _mm256_sub_ps(a, b);
-    sum256 = _mm256_add_ps(sum256, _mm256_mul_ps(diff, diff));
+  if (v1->dimension >= 8) {
+    __m256 sum256 = _mm256_setzero_ps();
+    for (; i <= v1->dimension - 8; i += 8) {
+      __m256 a = _mm256_loadu_ps(v1->data + i);
+      __m256 b = _mm256_loadu_ps(v2->data + i);
+      __m256 diff = _mm256_sub_ps(a, b);
+      sum256 = _mm256_add_ps(sum256, _mm256_mul_ps(diff, diff));
+    }
+    sum = hsum256_ps(sum256);
   }
-  sum = hsum256_ps(sum256);
 #endif
 
   for (; i < v1->dimension; i++) {
@@ -94,12 +103,14 @@ void vector_normalize(Vector *v) {
 
   // Calculate magnitude
 #ifdef __AVX__
-  __m256 sum256 = _mm256_setzero_ps();
-  for (; i <= v->dimension - 8; i += 8) {
-    __m256 a = _mm256_loadu_ps(v->data + i);
-    sum256 = _mm256_fmadd_ps(a, a, sum256);
+  if (v1->dimension >= 8) {
+    __m256 sum256 = _mm256_setzero_ps();
+    for (; i <= v->dimension - 8; i += 8) {
+      __m256 a = _mm256_loadu_ps(v->data + i);
+      sum256 = _mm256_fmadd_ps(a, a, sum256);
+    }
+    dot = hsum256_ps(sum256);
   }
-  dot = hsum256_ps(sum256);
 #endif
   for (; i < v->dimension; i++) {
     dot += v->data[i] * v->data[i];

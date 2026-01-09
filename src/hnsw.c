@@ -65,6 +65,10 @@ void hnsw_free(HNSWIndex *index) {
     free(index->visited_history);
   if (index->visited_bitset)
     free(index->visited_bitset);
+  if (index->deleted_bitset)
+    free(index->deleted_bitset);
+  if (index->key_to_id)
+    hash_table_destroy(index->key_to_id);
 
   free(index);
 }
@@ -154,6 +158,9 @@ HNSWIndex *hnsw_create(DistanceMetric metric, int M, int ef_construction,
   index->visited_bitset = calloc((index->capacity >> 3) + 1, sizeof(uint8_t));
   index->visited_history = malloc(ef_construction * M * 2 * sizeof(uint32_t));
   index->visited_count = 0;
+
+  index->deleted_bitset = calloc((index->capacity >> 3) + 1, sizeof(uint8_t));
+  index->key_to_id = hash_table_create(32);
 
   return index;
 }
@@ -265,6 +272,19 @@ void hnsw_prune_add(uint32_t *neighbors, float *distances, uint32_t *count,
     (*count)++;
 }
 
+void hnsw_del(HNSWIndex *index, const Bytes *key) {
+
+  r_obj *o = hash_table_get(index->key_to_id, (Bytes *)key);
+
+  if (o == NULL)
+    return;
+
+  uint32_t node_id = *(long long *)o->data;
+
+  bitset_set(index->deleted_bitset, node_id);
+  hash_table_del(index->key_to_id, (Bytes *)key);
+}
+
 void hnsw_insert(HNSWIndex *index, const Bytes *key, Vector *v) {
   size_t vector_memory = sizeof(Vector) + (index->dimension * sizeof(float));
   uint32_t key_len = key->length;
@@ -282,6 +302,12 @@ void hnsw_insert(HNSWIndex *index, const Bytes *key, Vector *v) {
     uint32_t new_bytes = (new_cap >> 3) + 1;
     index->visited_bitset = realloc(index->visited_bitset, new_bytes);
     memset(index->visited_bitset + old_bytes, 0, new_bytes - old_bytes);
+
+    index->deleted_bitset = realloc(index->deleted_bitset, new_bytes);
+    memset(index->deleted_bitset + old_bytes, 0, new_bytes - old_bytes);
+
+    memset(index->nodes + index->capacity, 0,
+           (new_cap - index->capacity) * sizeof(HNSWNode *));
 
     index->capacity = new_cap;
   }
@@ -364,6 +390,8 @@ void hnsw_insert(HNSWIndex *index, const Bytes *key, Vector *v) {
     index->current_max_layer = level;
   }
 
+  hash_table_set(index->key_to_id, (Bytes *)key, create_int_object(node_id));
+
   index->memory_used += vector_memory + key_len + node_mem;
 }
 
@@ -392,13 +420,19 @@ HNSWNode **hnsw_search(HNSWIndex *index, Vector *query, int k,
   hnsw_search_layer_base(index, query, curr_entry, &results, 0);
 
   int result_limit = (results.size < k) ? results.size : k;
-  *found_count = result_limit;
 
   HNSWNode **output_nodes = malloc(result_limit * sizeof(HNSWNode *));
+  int valid_count = 0;
   for (int i = 0; i < result_limit; i++) {
-    output_nodes[i] = index->nodes[results.candidates[i].node_id];
+
+    if (bitset_get(index->deleted_bitset, results.candidates[i].node_id)) {
+      continue;
+    }
+
+    output_nodes[valid_count++] = index->nodes[results.candidates[i].node_id];
   }
 
+  *found_count = valid_count;
   free(results.candidates);
   return output_nodes;
 }

@@ -2,6 +2,7 @@
 #define HNSW_H
 
 #include "bytes.h"
+#include "hash_table.h"
 #include "vector.h"
 #include <stdint.h>
 
@@ -35,6 +36,9 @@ typedef struct HNSWIndex_ {
 
   uint8_t *visited_bitset;
 
+  HashTable *key_to_id;
+  uint8_t *deleted_bitset;
+
   uint64_t memory_used;
 } HNSWIndex;
 
@@ -50,14 +54,17 @@ typedef struct CandidateList_ {
   uint16_t head;
 } CandidateList;
 
-r_obj *create_hnsw_object(DistanceMetric metric, int M, int ef_construction, uint32_t dimension);
+r_obj *create_hnsw_object(DistanceMetric metric, int M, int ef_construction,
+                          uint32_t dimension);
 
 HNSWNode *hnsw_create_node(int L, int M, Vector *v, Bytes *key);
-HNSWIndex *hnsw_create(DistanceMetric metric, int M, int ef_construction, uint32_t dimension);
+HNSWIndex *hnsw_create(DistanceMetric metric, int M, int ef_construction,
+                       uint32_t dimension);
 void hnsw_free(HNSWIndex *index);
 void hnsw_insert(HNSWIndex *index, const Bytes *key, Vector *v);
 HNSWNode **hnsw_search(HNSWIndex *index, Vector *query, int k,
                        int *found_count);
+void hnsw_del(HNSWIndex *index, const Bytes *key);
 int hnsw_random_level(int M);
 uint32_t hnsw_search_layer_greedy(HNSWIndex *index, Vector *query,
                                   uint32_t entry_id, int layer);
