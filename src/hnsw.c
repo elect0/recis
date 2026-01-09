@@ -30,13 +30,14 @@ static inline float get_dist(HNSWIndex *index, const Vector *v1,
     return vector_dist_cosine(v1, v2);
 }
 
-r_obj *create_hnsw_object(DistanceMetric metric, int M, int ef_construction) {
+r_obj *create_hnsw_object(DistanceMetric metric, int M, int ef_construction,
+                          uint32_t dimension) {
   r_obj *o;
   if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL)
     return NULL;
 
   o->type = HNSW;
-  o->data = (void *)hnsw_create(metric, M, ef_construction);
+  o->data = (void *)hnsw_create(metric, M, ef_construction, dimension);
 
   return o;
 }
@@ -80,7 +81,7 @@ HNSWNode *hnsw_create_node(int level, int M, Vector *v, Bytes *key) {
   if (!node)
     return NULL;
 
-  node->vec = v;
+  node->vec = vector_dup(v);
   node->key = bytes_dup(key);
   node->max_layer = level - 1;
 
@@ -131,7 +132,8 @@ int hnsw_random_level(int M) {
   return (int)(-log(r) * (1.0 / log(M)));
 }
 
-HNSWIndex *hnsw_create(DistanceMetric metric, int M, int ef_construction) {
+HNSWIndex *hnsw_create(DistanceMetric metric, int M, int ef_construction,
+                       uint32_t dimension) {
   HNSWIndex *index = malloc(sizeof(HNSWIndex));
   if (!index)
     return NULL;
@@ -145,6 +147,9 @@ HNSWIndex *hnsw_create(DistanceMetric metric, int M, int ef_construction) {
   index->ef_construction = ef_construction;
   index->entry_point_id = -1;
   index->current_max_layer = -1;
+
+  index->dimension = dimension;
+  index->memory_used = 0;
 
   index->visited_bitset = calloc((index->capacity >> 3) + 1, sizeof(uint8_t));
   index->visited_history = malloc(ef_construction * M * 2 * sizeof(uint32_t));
@@ -261,12 +266,32 @@ void hnsw_prune_add(uint32_t *neighbors, float *distances, uint32_t *count,
 }
 
 void hnsw_insert(HNSWIndex *index, const Bytes *key, Vector *v) {
+  size_t vector_memory = sizeof(Vector) + (index->dimension * sizeof(float));
+  uint32_t key_len = key->length;
+
   if (index->metric == METRIC_COSINE) {
     vector_normalize(v);
   }
 
+  if (index->count >= index->capacity) {
+    uint32_t new_cap = index->capacity * 2;
+
+    index->nodes = realloc(index->nodes, new_cap * sizeof(HNSWNode *));
+
+    uint32_t old_bytes = (index->capacity >> 3) + 1;
+    uint32_t new_bytes = (new_cap >> 3) + 1;
+    index->visited_bitset = realloc(index->visited_bitset, new_bytes);
+    memset(index->visited_bitset + old_bytes, 0, new_bytes - old_bytes);
+
+    index->capacity = new_cap;
+  }
+
   uint32_t node_id = index->count++;
   int level = hnsw_random_level(index->M);
+
+  int links_count =
+      (level == 0) ? (index->M * 2) : ((index->M) * 2) + (level * index->M);
+  size_t node_mem = sizeof(HNSWNode) + (links_count * sizeof(uint32_t));
 
   HNSWNode *new_node = hnsw_create_node(level + 1, index->M, v, (Bytes *)key);
   index->nodes[node_id] = new_node;
@@ -274,6 +299,8 @@ void hnsw_insert(HNSWIndex *index, const Bytes *key, Vector *v) {
   if (index->entry_point_id == -1) {
     index->entry_point_id = node_id;
     index->current_max_layer = level;
+
+    index->memory_used += vector_memory + key_len + node_mem;
     return;
   }
 
@@ -316,7 +343,7 @@ void hnsw_insert(HNSWIndex *index, const Bytes *key, Vector *v) {
         uint32_t *nb_count = &nb_node->adj[i];
         uint32_t max = (i == 0) ? index->M * 2 : index->M;
 
-        float temp_dists[128];
+        float temp_dists[256];
 
         for (int k = 0; k < *nb_count; k++) {
           temp_dists[k] =
@@ -336,6 +363,8 @@ void hnsw_insert(HNSWIndex *index, const Bytes *key, Vector *v) {
     index->entry_point_id = node_id;
     index->current_max_layer = level;
   }
+
+  index->memory_used += vector_memory + key_len + node_mem;
 }
 
 HNSWNode **hnsw_search(HNSWIndex *index, Vector *query, int k,

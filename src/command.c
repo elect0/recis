@@ -51,6 +51,10 @@ Command CommandTable[] = {{"SET", set_command, -3},
                           {"ZSCORE", zscore_command, 3},
                           {"ZRANK", zrank_command, 3},
                           {"VIDX.CREATE", vidx_create_command, -4},
+                          {"VIDX.DROP", vidx_drop_command, 2},
+                          {"VIDX.LIST", vidx_list, 1},
+                          {"VIDX.INFO", vidx_info_command, 2},
+                          {"VADD", vadd_command, 4},
                           {"SAVE", save_command, 1},
                           {"PING", ping_command, 1},
                           {NULL, NULL, 0}};
@@ -63,7 +67,6 @@ r_obj *create_command_object(Command *cmd) {
   o->data = cmd;
   return o;
 }
-
 Command *command_lookup(char *name, int len) {
   for (int i = 0; CommandTable[i].name != NULL; i++) {
     char *cmd_name = CommandTable[i].name;
@@ -108,10 +111,26 @@ int try_parse_int64(const char *s, int64_t *out) {
   return 1;
 }
 
+uint32_t parse_uint32(const char *s) {
+  errno = 0;
+  char *end;
+  unsigned long val = strtoul(s, &end, 10);
+
+  if (errno != 0 || *end != '\0' || val > UINT32_MAX) {
+    return 0;
+  }
+
+  return (uint32_t)val;
+}
+
 long long get_time_ms() { return (long long)time(NULL) * 1000; }
 
-void set_command(Client *client, HashTable *db, HashTable *expires,
-                 OutputBuffer *ob) {
+void set_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  HashTable *expires = ctx->expires;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -277,8 +296,12 @@ void set_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void get_command(Client *client, HashTable *db, HashTable *expires,
-                 OutputBuffer *ob) {
+void get_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  HashTable *expires = ctx->expires;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -329,8 +352,12 @@ void get_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void del_command(Client *client, HashTable *db, HashTable *expires,
-                 OutputBuffer *ob) {
+void del_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  HashTable *expires = ctx->expires;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -355,8 +382,12 @@ void del_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void ttl_command(Client *client, HashTable *db, HashTable *expires,
-                 OutputBuffer *ob) {
+void ttl_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  HashTable *expires = ctx->expires;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -384,8 +415,11 @@ void ttl_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void incr_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void incr_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -432,8 +466,11 @@ void incr_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void incrby_command(Client *client, HashTable *db, HashTable *expires,
-                    OutputBuffer *ob) {
+void incrby_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -489,8 +526,11 @@ void incrby_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void decr_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void decr_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -537,8 +577,11 @@ void decr_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void decrby_command(Client *client, HashTable *db, HashTable *expires,
-                    OutputBuffer *ob) {
+void decrby_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -594,8 +637,10 @@ void decrby_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void lpush_command(Client *client, HashTable *db, HashTable *expires,
-                   OutputBuffer *ob) {
+void lpush_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
 
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
@@ -633,8 +678,11 @@ void lpush_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void llen_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void llen_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -663,8 +711,11 @@ void llen_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void lindex_command(Client *client, HashTable *db, HashTable *expires,
-                    OutputBuffer *ob) {
+void lindex_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -717,8 +768,11 @@ void lindex_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void lrange_command(Client *client, HashTable *db, HashTable *expires,
-                    OutputBuffer *ob) {
+void lrange_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -805,8 +859,12 @@ void lrange_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void lmove_command(Client *client, HashTable *db, HashTable *expires,
-                   OutputBuffer *ob) {
+void lmove_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  HashTable *expires = ctx->expires;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -904,8 +962,11 @@ void lmove_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void ltrim_command(Client *client, HashTable *db, HashTable *expires,
-                   OutputBuffer *ob) {
+void ltrim_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -974,8 +1035,10 @@ void ltrim_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void rpush_command(Client *client, HashTable *db, HashTable *expires,
-                   OutputBuffer *ob) {
+void rpush_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
 
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
@@ -1012,8 +1075,12 @@ void rpush_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void rpop_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void rpop_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  HashTable *expires = ctx->expires;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -1096,8 +1163,12 @@ void rpop_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void lpop_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void lpop_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  HashTable *expires = ctx->expires;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -1180,8 +1251,11 @@ void lpop_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void scard_command(Client *client, HashTable *db, HashTable *expires,
-                   OutputBuffer *ob) {
+void scard_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -1212,8 +1286,11 @@ void scard_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void sadd_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void sadd_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -1252,8 +1329,12 @@ void sadd_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void srem_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void srem_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  HashTable *expires = ctx->expires;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -1296,8 +1377,11 @@ void srem_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void sinter_command(Client *client, HashTable *db, HashTable *expires,
-                    OutputBuffer *ob) {
+void sinter_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -1393,8 +1477,11 @@ void sinter_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void sismember_command(Client *client, HashTable *db, HashTable *expires,
-                       OutputBuffer *ob) {
+void sismember_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -1424,8 +1511,11 @@ void sismember_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void smembers_command(Client *client, HashTable *db, HashTable *expires,
-                      OutputBuffer *ob) {
+void smembers_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -1479,8 +1569,10 @@ void smembers_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void hset_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void hset_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
 
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
@@ -1520,8 +1612,10 @@ void hset_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void hget_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void hget_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
 
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
@@ -1566,8 +1660,10 @@ void hget_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void hmget_command(Client *client, HashTable *db, HashTable *expires,
-                   OutputBuffer *ob) {
+void hmget_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
 
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
@@ -1623,8 +1719,11 @@ void hmget_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void hincrby_command(Client *client, HashTable *db, HashTable *expires,
-                     OutputBuffer *ob) {
+void hincrby_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -1688,8 +1787,10 @@ void hincrby_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void zadd_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void zadd_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
 
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
@@ -1852,8 +1953,12 @@ void zadd_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void zrem_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void zrem_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  HashTable *expires = ctx->expires;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -1909,8 +2014,11 @@ void zrem_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void zcard_command(Client *client, HashTable *db, HashTable *expires,
-                   OutputBuffer *ob) {
+void zcard_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -1942,8 +2050,11 @@ void zcard_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void zrange_command(Client *client, HashTable *db, HashTable *expires,
-                    OutputBuffer *ob) {
+void zrange_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -2180,8 +2291,11 @@ void zrange_command(Client *client, HashTable *db, HashTable *expires,
   write(ob->fd, header, header_len);
 }
 
-void zscore_command(Client *client, HashTable *db, HashTable *expires,
-                    OutputBuffer *ob) {
+void zscore_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -2216,8 +2330,11 @@ void zscore_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void zrank_command(Client *client, HashTable *db, HashTable *expires,
-                   OutputBuffer *ob) {
+void zrank_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -2259,8 +2376,11 @@ void zrank_command(Client *client, HashTable *db, HashTable *expires,
   return;
 }
 
-void vidx_create_command(Client *client, HashTable *db, HashTable *expires,
-                         OutputBuffer *ob) {
+void vidx_create_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *vector_indices = ctx->vector_indices;
+  OutputBuffer *ob = ctx->ob;
+
   Bytes **arg_values = client->arg_values;
   int arg_count = client->arg_count;
 
@@ -2272,6 +2392,7 @@ void vidx_create_command(Client *client, HashTable *db, HashTable *expires,
   int M = 16;
   int ef_construction = 200;
 
+  uint32_t dimension = parse_uint32(arg_values[2]->data);
   char *metric_str = arg_values[3]->data;
 
   DistanceMetric metric;
@@ -2313,22 +2434,165 @@ void vidx_create_command(Client *client, HashTable *db, HashTable *expires,
   if (ef_construction < M)
     ef_construction = M;
 
-  r_obj *o = create_hnsw_object(metric, M, ef_construction);
-  hash_table_set(db, arg_values[1], o);
+  r_obj *o = create_hnsw_object(metric, M, ef_construction, dimension);
+  hash_table_set(vector_indices, arg_values[1], o);
 
   append_to_output_buffer(ob, "+OK\r\n", 5);
   return;
 }
 
-void save_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
+void vidx_drop_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *vector_indices = ctx->vector_indices;
+  OutputBuffer *ob = ctx->ob;
+
+  Bytes **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 2) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(vector_indices, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, "_\r\n", 3);
+    return;
+  }
+
+  hash_table_del(vector_indices, arg_values[1]);
+  append_to_output_buffer(ob, "+OK\r\n", 5);
+}
+
+void vidx_list(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *vector_indices = ctx->vector_indices;
+  OutputBuffer *ob = ctx->ob;
+
+  int arg_count = client->arg_count;
+
+  if (arg_count != 1) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  char header[64];
+  int header_len =
+      snprintf(header, sizeof(header), "*%ld\r\n", vector_indices->count);
+  append_to_output_buffer(ob, header, header_len);
+
+  int j;
+  for (j = 0; j < vector_indices->size; j++) {
+    Node *node = vector_indices->buckets[j];
+
+    while (node) {
+      Node *next = node->next;
+      Bytes *key = node->key;
+
+      char bulk_header[64];
+      int bh_len = snprintf(bulk_header, sizeof(bulk_header),
+                            "$%" PRIu32 "\r\n", key->length);
+      append_to_output_buffer(ob, bulk_header, bh_len);
+      append_to_output_buffer(ob, key->data, key->length);
+      append_to_output_buffer(ob, "\r\n", 2);
+      node = next;
+    }
+  }
+
+  return;
+}
+
+void vidx_info_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *vector_indices = ctx->vector_indices;
+  OutputBuffer *ob = ctx->ob;
+
+  Bytes **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 2) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(vector_indices, arg_values[1]);
+
+  if (!o) {
+    append_to_output_buffer(ob, "%0\r\n", 4);
+    return;
+  }
+
+  HNSWIndex *idx = (HNSWIndex *)o->data;
+
+  append_to_output_buffer(ob, "%4\r\n", 4);
+
+  char resp[256];
+  int resp_len = snprintf(
+      resp, sizeof(resp),
+      "+count\r\n:%" PRIu32 "\r\n+dimension\r\n:%" PRIu32
+      "\r\n+memory_usage\r\n:%" PRIu64 "\r\n+max_layer\r\n:%d\r\n",
+      idx->count, idx->dimension, idx->memory_used, idx->current_max_layer);
+
+  append_to_output_buffer(ob, resp, resp_len);
+  return;
+}
+
+void vadd_command(CommandContext *ctx) {
+  Client *client = ctx->client;
+  HashTable *db = ctx->db;
+  HashTable *vector_indices = ctx->vector_indices;
+  OutputBuffer *ob = ctx->ob;
+
+  Bytes **arg_values = client->arg_values;
+  int arg_count = client->arg_count;
+
+  if (arg_count != 4) {
+    append_to_output_buffer(ob, "-ERR args\r\n", 11);
+    return;
+  }
+
+  r_obj *o = hash_table_get(vector_indices, arg_values[1]);
+  if (!o) {
+    append_to_output_buffer(ob, ":0\r\n", 4);
+    return;
+  }
+
+  HNSWIndex *idx = (HNSWIndex *)o->data;
+  Vector *v = parse_vector(arg_values[3]->data, idx->dimension);
+  if (v == NULL) {
+    append_to_output_buffer(ob, ":0\r\n", 4);
+    return;
+  }
+
+  if (hash_table_get(db, arg_values[2]) != NULL) {
+    // TODO: Implement UPSERT
+    append_to_output_buffer(ob, ":0\r\n", 4);
+    vector_free(v);
+    return;
+  }
+
+  hnsw_insert(idx, arg_values[2], v);
+
+  r_obj *vector_o = create_vector_object(v);
+  hash_table_set(db, arg_values[2], vector_o);
+
+  append_to_output_buffer(ob, ":1\r\n", 4);
+  return;
+}
+
+void save_command(CommandContext *ctx) {
+  HashTable *db = ctx->db;
+  HashTable *expires = ctx->expires;
+  OutputBuffer *ob = ctx->ob;
+
   rdb_save(db, expires, "dump.rdb");
   append_to_output_buffer(ob, "+OK\r\n", 5);
   return;
 }
+void ping_command(CommandContext *ctx) {
+  OutputBuffer *ob = ctx->ob;
 
-void ping_command(Client *client, HashTable *db, HashTable *expires,
-                  OutputBuffer *ob) {
   append_to_output_buffer(ob, "+PONG\r\n", 7);
   return;
 }

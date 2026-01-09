@@ -20,13 +20,13 @@ static inline float hsum256_ps(__m256 v) {
   return _mm_cvtss_f32(sums);
 }
 
-r_obj *create_vector_object(uint32_t dimension, const float *init_data) {
+r_obj *create_vector_object(Vector *v) {
   r_obj *o;
   if ((o = (r_obj *)malloc(sizeof(r_obj))) == NULL)
     return NULL;
 
   o->type = VECTOR;
-  o->data = (void *)create_vector_object(dimension, init_data);
+  o->data = (void *)v;
 
   return o;
 }
@@ -49,6 +49,17 @@ Vector *vector_create(uint32_t dimension, const float *init_data) {
   }
 
   return v;
+}
+
+Vector *vector_dup(const Vector *v) {
+  if (v == NULL)
+    return NULL;
+
+  Vector *dst = vector_create(v->dimension, v->data);
+
+  dst->flags = v->flags;
+
+  return dst;
 }
 
 void vector_free(Vector *v) {

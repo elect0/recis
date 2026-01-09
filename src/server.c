@@ -97,11 +97,8 @@ int main() {
 
   HashTable *db = hash_table_create(1024);
   HashTable *expires = hash_table_create(16);
-  HashTable *vector_indices = hash_table_create(1024);
-  // HashTable *cmd_registry = hash_table_create(32);
-  //
-  // populate_command_table(cmd_registry);
-  //
+  HashTable *vector_indices = hash_table_create(16);
+
   rdb_load(db, expires, "dump.rdb");
 
   set_nonblocking(server_fd);
@@ -196,7 +193,8 @@ int main() {
               if (cmd == NULL) {
                 append_to_output_buffer(ob, "-ERR unknown command\r\n", 22);
               } else {
-                cmd->proc(c, db, expires, ob);
+                CommandContext ctx = {c, db, expires, vector_indices, ob};
+                cmd->proc(&ctx);
               }
 
               c->query_pos += consumed;
